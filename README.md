@@ -1,5 +1,4 @@
-# MICCAI challenges 2017
+# MICCAI challenges 2018
 
-This repository is based on the cnn-nolearn repository with modifications for multiclass segmentation (both iSeg and BraTS). 
-At some point I might merge the changes. ~~~However, the final approach (and most likely weights) for the challenge will be public here.~~~ The approaches contained here are just experimental and not final. They do not represent the approaches we presented to any MICCAI's challenge.
+This repository is based on the 2017 repository. The idea is to implement something for BraTS 2018 (and maybe some other challenge).
 
