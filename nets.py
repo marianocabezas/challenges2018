@@ -4,7 +4,6 @@ from keras.layers import BatchNormalization, LSTM, Permute, Activation, PReLU, A
 from keras.models import Model
 from itertools import product
 import numpy as np
-from layers import GradientReversal, PrimaryCap3D, CapsuleLayer, Length
 
 
 def dsc_loss(y_true, y_pred):
