@@ -6,7 +6,7 @@ import numpy as np
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from nibabel import load as load_nii
 from utils import color_codes
-from data_creation import get_bounding_blocks, get_blocks, load_norm_list, load_images
+from data_creation import get_bounding_blocks, get_blocks, load_images
 from data_manipulation.metrics import dsc_seg
 from nets import get_brats_unet
 from utils import leave_one_out
@@ -42,12 +42,12 @@ def parse_inputs():
     )
     parser.add_argument(
         '-c', '--conv-blocks',
-        dest='conv_blocks', type=int, default=8,
+        dest='conv_blocks', type=int, default=5,
         help='Number of convolutional layers'
     )
     parser.add_argument(
         '-b', '--batch-size',
-        dest='batch_size', type=int, default=16,
+        dest='batch_size', type=int, default=32,
         help='Batch size for training'
     )
     parser.add_argument(
@@ -154,7 +154,7 @@ def train_net(net, x, y, p, sufix):
 
     print('%s[%s] %sTraining the network %s(%s%d %sparameters)' %
           (c['c'], strftime("%H:%M:%S"), c['g'], c['nc'], c['b'], net.count_params(), c['nc']))
-
+    net.summary()
     net_name = os.path.join(patient_path, 'brats2017%s.mdl' % sufix)
     checkpoint = 'brats2017%s{epoch:02d}.{val_brain_acc:.2f}.hdf5' % sufix
 
@@ -192,7 +192,7 @@ def test_net(net, p, outputname):
         load_nii(roiname)
     except IOError:
         # Image loading
-        test_data = load_images(p)
+        x = np.stack(load_images(p), axis=0)
 
         # Network parameters
         conv_blocks = options['conv_blocks']
@@ -200,18 +200,18 @@ def test_net(net, p, outputname):
         filters_list = n_filters if len(n_filters) > 1 else n_filters * conv_blocks
         conv_width = options['conv_width']
         kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
-        input_shape = (4,) + test_data[0].shape
 
-        image_net = get_brats_unet(input_shape, filters_list, kernel_size_list, 5)
+        image_net = get_brats_unet(x.shape, filters_list, kernel_size_list, 5)
         # We should copy the weights here
+        for l_new, l_orig in zip(image_net.layers[1, :], net.layers[1, :]):
+            l_new.set_weights(l_orig.get_weights())
 
         # Now we can test
         print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
         # Load only the patient images
         print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
               (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-        x = load_norm_list(p)
-        image = net.predict(x, batch_size=options['batch_size'])
+        image = image_net.predict(x, batch_size=options['batch_size'])
     return image
 
 
@@ -278,17 +278,20 @@ def main():
             len(x)
         ))
 
+        idx = np.random.permutation(range(len(x)))
+
+        x = x[idx]
+        y = y[idx]
+
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
         print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
-
-        idx = np.random.permutation(range(len(x)))
 
         # Training
         input_shape = (4,) + patch_size
         net = get_brats_unet(input_shape, filters_list, kernel_size_list, 5)
         train_net(
-            x=x[idx],
-            y=y[idx],
+            x=x,
+            y=y,
             net=net,
             p=p,
             sufix=sufix
