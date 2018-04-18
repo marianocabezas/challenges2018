@@ -45,9 +45,9 @@ def train_test_split(data, labels, test_size=0.1, random_state=42):
     return x_train, x_test, y_train, y_test, idx_train, idx_test
 
 
-def leave_one_out(data_list, labels_list):
-    for i in range(0, len(data_list)):
-        yield data_list[:i] + data_list[i+1:], labels_list[:i] + labels_list[i+1:], i
+def leave_one_out(data_list):
+    for i, test in enumerate(data_list):
+        yield data_list[:i] + data_list[i+1:], i
 
 
 def nfold_cross_validation(data_list, labels_list, n=5, random_state=42, val_data=None):
