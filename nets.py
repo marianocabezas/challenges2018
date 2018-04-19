@@ -32,7 +32,7 @@ def get_brats_unet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.
         data_format='channels_first'
     )(curr_tensor)
     for i, (filters, kernel_size, prev_tensor) in enumerate(deconv_zip):
-        concat = concatenate([prev_tensor, curr_tensor], axis=0)
+        concat = concatenate([prev_tensor, curr_tensor], axis=1)
         deconv = Conv3DTranspose(
             filters,
             kernel_size=kernel_size,

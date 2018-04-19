@@ -32,7 +32,7 @@ def parse_inputs():
     # Network parameters
     parser.add_argument(
         '-i', '--patch-width',
-        dest='patch_width', type=int, default=19,
+        dest='patch_width', type=int, default=25,
         help='Initial patch size'
     )
     parser.add_argument(
@@ -42,7 +42,7 @@ def parse_inputs():
     )
     parser.add_argument(
         '-c', '--conv-blocks',
-        dest='conv_blocks', type=int, default=5,
+        dest='conv_blocks', type=int, default=8,
         help='Number of convolutional layers'
     )
     parser.add_argument(
@@ -67,7 +67,7 @@ def parse_inputs():
     )
     parser.add_argument(
         '-e', '--epochs',
-        action='store', dest='epochs', type=int, default=5,
+        action='store', dest='epochs', type=int, default=10,
         help='Number of maximum epochs for training'
     )
     parser.add_argument(
@@ -87,7 +87,7 @@ def parse_inputs():
     )
     parser.add_argument(
         '-P', '--patience',
-        dest='patience', type=int, default=2,
+        dest='patience', type=int, default=5,
         help='Maximum number of epochs without validation accuracy improvement'
     )
     parser.add_argument(
@@ -154,18 +154,18 @@ def train_net(net, x, y, p, sufix):
 
     print('%s[%s] %sTraining the network %s(%s%d %sparameters)' %
           (c['c'], strftime("%H:%M:%S"), c['g'], c['nc'], c['b'], net.count_params(), c['nc']))
-    net.summary()
+    # net.summary()
     net_name = os.path.join(patient_path, 'brats2017%s.mdl' % sufix)
-    checkpoint = 'brats2017%s{epoch:02d}.{val_brain_acc:.2f}.hdf5' % sufix
+    checkpoint = 'brats2017%s.hdf5' % sufix
 
     callbacks = [
         EarlyStopping(
-            monitor='val_seg_loss',
+            monitor='val_loss',
             patience=options['patience']
         ),
         ModelCheckpoint(
             os.path.join(patient_path, checkpoint),
-            monitor='val_seg_loss',
+            monitor='val_loss',
             save_best_only=True
         )
     ]
@@ -192,7 +192,7 @@ def test_net(net, p, outputname):
         load_nii(roiname)
     except IOError:
         # Image loading
-        x = np.stack(load_images(p), axis=0)
+        x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
 
         # Network parameters
         conv_blocks = options['conv_blocks']
@@ -201,9 +201,9 @@ def test_net(net, p, outputname):
         conv_width = options['conv_width']
         kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
 
-        image_net = get_brats_unet(x.shape, filters_list, kernel_size_list, 5)
+        image_net = get_brats_unet(x.shape[1:], filters_list, kernel_size_list, 5)
         # We should copy the weights here
-        for l_new, l_orig in zip(image_net.layers[1, :], net.layers[1, :]):
+        for l_new, l_orig in zip(image_net.layers[1:], net.layers[1:]):
             l_new.set_weights(l_orig.get_weights())
 
         # Now we can test
@@ -211,7 +211,11 @@ def test_net(net, p, outputname):
         # Load only the patient images
         print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
               (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-        image = image_net.predict(x, batch_size=options['batch_size'])
+        pr_maps = image_net.predict(x, batch_size=options['batch_size'])
+        image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
+        roi_nii = load_nii(p[0])
+        roi_nii.get_data()[:] = image
+        roi_nii.to_filename(outputname_path)
     return image
 
 
@@ -262,11 +266,11 @@ def main():
         ))
 
         x, y = get_blocks(
-            image_names,
-            label_names,
-            train_centers,
-            patch_size,
-            patch_size,
+            image_names=image_names,
+            label_names=label_names,
+            centers=train_centers,
+            patch_size=patch_size,
+            output_size=patch_size,
             nlabels=5,
             verbose=True
         )
@@ -288,7 +292,12 @@ def main():
 
         # Training
         input_shape = (4,) + patch_size
-        net = get_brats_unet(input_shape, filters_list, kernel_size_list, 5)
+        net = get_brats_unet(
+            input_shape=input_shape,
+            filters_list=filters_list,
+            kernel_size_list=kernel_size_list,
+            nlabels=5
+        )
         train_net(
             x=x,
             y=y,
@@ -297,7 +306,7 @@ def main():
             sufix=sufix
         )
 
-        image_cnn_name = os.path.join(patient_path, p_name + '.cnn.test')
+        image_cnn_name = os.path.join(patient_path, p_name + '.cnn.test' + sufix)
         try:
             image_cnn = load_nii(image_cnn_name + '.nii.gz').get_data()
         except IOError:
