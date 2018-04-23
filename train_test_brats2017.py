@@ -116,7 +116,7 @@ def parse_inputs():
         help='Labels image sufix'
     )
     parser.add_argument(
-        '-n', '--net',
+        '-N', '--net',
         action='store', dest='net', default='unet',
         help='Typor of network architecture'
     )
