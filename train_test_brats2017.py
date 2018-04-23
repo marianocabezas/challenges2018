@@ -11,6 +11,12 @@ from data_manipulation.metrics import dsc_seg
 from nets import get_brats_unet, get_brats_invunet
 from utils import leave_one_out
 
+import tensorflow as tf
+from keras.backend.tensorflow_backend import set_session
+config = tf.ConfigProto()
+config.gpu_options.visible_device_list = "0"
+set_session(tf.Session(config=config))
+
 
 def parse_inputs():
     # I decided to separate this function, for easier acces to the command line parameters
