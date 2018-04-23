@@ -8,7 +8,7 @@ from nibabel import load as load_nii
 from utils import color_codes
 from data_creation import get_bounding_blocks, get_blocks, load_images
 from data_manipulation.metrics import dsc_seg
-from nets import get_brats_unet
+from nets import get_brats_unet, get_brats_invunet
 from utils import leave_one_out
 
 
@@ -32,7 +32,7 @@ def parse_inputs():
     # Network parameters
     parser.add_argument(
         '-i', '--patch-width',
-        dest='patch_width', type=int, default=25,
+        dest='patch_width', type=int, default=21,
         help='Initial patch size'
     )
     parser.add_argument(
@@ -42,12 +42,12 @@ def parse_inputs():
     )
     parser.add_argument(
         '-c', '--conv-blocks',
-        dest='conv_blocks', type=int, default=8,
+        dest='conv_blocks', type=int, default=5,
         help='Number of convolutional layers'
     )
     parser.add_argument(
         '-b', '--batch-size',
-        dest='batch_size', type=int, default=32,
+        dest='batch_size', type=int, default=128,
         help='Batch size for training'
     )
     parser.add_argument(
@@ -115,7 +115,20 @@ def parse_inputs():
         action='store', dest='labels', default='_seg.nii.gz',
         help='Labels image sufix'
     )
-    return vars(parser.parse_args())
+    parser.add_argument(
+        '-n', '--net',
+        action='store', dest='net', default='unet',
+        help='Typor of network architecture'
+    )
+    networks = {
+        'unet': get_brats_unet,
+        'invunet': get_brats_invunet
+    }
+
+    options = vars(parser.parse_args())
+    options['net'] = networks[options['net']]
+
+    return options
 
 
 def get_names_from_path(options):
@@ -143,8 +156,10 @@ def check_dsc(gt_name, image):
     return [dsc_seg(gt == l, image == l) for l in labels[1:]]
 
 
-def train_net(net, x, y, p, sufix):
+def train_net(net, image_names, label_names, train_centers, p, sufix):
     options = parse_inputs()
+    patch_width = options['patch_width']
+    patch_size = (patch_width, patch_width, patch_width)
     c = color_codes()
     # Data stuff
     patient_path = '/'.join(p[0].rsplit('/')[:-1])
@@ -174,6 +189,31 @@ def train_net(net, x, y, p, sufix):
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
+        x, y = get_blocks(
+            image_names=image_names,
+            label_names=label_names,
+            centers=train_centers,
+            patch_size=patch_size,
+            output_size=patch_size,
+            nlabels=5,
+            verbose=True
+        )
+        print('%s- Concatenating the data' % ' '.join([''] * 12))
+        x = np.concatenate(x)
+        y = np.concatenate(y)
+        print('%s-- Using %d blocks of data' % (
+            ' '.join([''] * 12),
+            len(x)
+        ))
+
+        idx = np.random.permutation(range(len(x)))
+
+        x = x[idx]
+        y = y[idx]
+
+        print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
+        print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
+
         print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
         net.fit(x, y, batch_size=batch_size, validation_split=0.25, epochs=epochs, callbacks=callbacks)
         net.load_weights(os.path.join(patient_path, checkpoint))
@@ -201,7 +241,7 @@ def test_net(net, p, outputname):
         conv_width = options['conv_width']
         kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
 
-        image_net = get_brats_unet(x.shape[1:], filters_list, kernel_size_list, 5)
+        image_net = options['net'](x.shape[1:], filters_list, kernel_size_list, 5)
         # We should copy the weights here
         for l_new, l_orig in zip(image_net.layers[1:], net.layers[1:]):
             l_new.set_weights(l_orig.get_weights())
@@ -250,6 +290,10 @@ def main():
         lambda names: get_bounding_blocks(load_nii(names[0]).get_data(), patch_width),
         image_names
     )
+    networks = {
+        'unet': get_brats_unet,
+        'invunet': get_brats_invunet
+    }
 
     print('%s[%s] %sStarting leave-one-out%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     for train_centers, i in leave_one_out(centers):
@@ -265,42 +309,18 @@ def main():
             c['c'], c['b'], i+1, c['nc'], c['c'], len(centers), c['nc']
         ))
 
-        x, y = get_blocks(
-            image_names=image_names,
-            label_names=label_names,
-            centers=train_centers,
-            patch_size=patch_size,
-            output_size=patch_size,
-            nlabels=5,
-            verbose=True
-        )
-        print('%s- Concatenating the data' % ' '.join([''] * 12))
-        x = np.concatenate(x)
-        y = np.concatenate(y)
-        print('%s-- Using %d blocks of data' % (
-            ' '.join([''] * 12),
-            len(x)
-        ))
-
-        idx = np.random.permutation(range(len(x)))
-
-        x = x[idx]
-        y = y[idx]
-
-        print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
-        print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
-
         # Training
         input_shape = (4,) + patch_size
-        net = get_brats_unet(
+        net = options['net'](
             input_shape=input_shape,
             filters_list=filters_list,
             kernel_size_list=kernel_size_list,
             nlabels=5
         )
         train_net(
-            x=x,
-            y=y,
+            image_names=image_names,
+            label_names=label_names,
+            train_centers=train_centers,
             net=net,
             p=p,
             sufix=sufix

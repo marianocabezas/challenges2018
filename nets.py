@@ -57,3 +57,53 @@ def get_brats_unet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.
     )
 
     return net
+
+
+def get_brats_invunet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.5):
+    inputs = Input(shape=input_shape, name='seg_inputs')
+
+    curr_tensor = inputs
+    conv_list = list()
+    for i, (filters, kernel_size) in enumerate(zip(filters_list, kernel_size_list)):
+        conv = Conv3DTranspose(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        curr_tensor = Dropout(drop)(conv(curr_tensor))
+        conv_list.append(curr_tensor)
+
+    deconv_zip = zip(filters_list[-2::-1], kernel_size_list[-2::-1], conv_list[-2::-1])
+    curr_tensor = Conv3D(
+        filters_list[-1],
+        kernel_size=kernel_size_list[-1],
+        activation='relu',
+        data_format='channels_first'
+    )(curr_tensor)
+    for i, (filters, kernel_size, prev_tensor) in enumerate(deconv_zip):
+        concat = concatenate([prev_tensor, curr_tensor], axis=1)
+        deconv = Conv3D(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        curr_tensor = Dropout(drop)(deconv(concat))
+
+    dense = Conv3D(nlabels, kernel_size=(1, 1, 1), data_format='channels_first')
+    curr_tensor = dense(curr_tensor)
+
+    curr_tensor = Reshape((nlabels, -1))(curr_tensor)
+    curr_tensor = Permute((2, 1))(curr_tensor)
+    outputs = Activation('softmax', name='seg')(curr_tensor)
+
+    net = Model(inputs=inputs, outputs=outputs)
+
+    net.compile(
+        optimizer='adadelta',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    return net
