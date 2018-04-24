@@ -224,7 +224,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         net.load_weights(os.path.join(patient_path, checkpoint))
 
 
-def test_net(net, p, outputname):
+def test_net(net, p, outputname, nlabels):
 
     c = color_codes()
     options = parse_inputs()
@@ -246,7 +246,7 @@ def test_net(net, p, outputname):
         conv_width = options['conv_width']
         kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
 
-        image_net = options['net'](x.shape[1:], filters_list, kernel_size_list, 5)
+        image_net = options['net'](x.shape[1:], filters_list, kernel_size_list, nlabels)
         # We should copy the weights here
         for l_new, l_orig in zip(image_net.layers[1:], net.layers[1:]):
             l_new.set_weights(l_orig.get_weights())
@@ -332,7 +332,7 @@ def main():
         try:
             image_cnn = load_nii(image_cnn_name + '.nii.gz').get_data()
         except IOError:
-            image_cnn = test_net(net, p, image_cnn_name)
+            image_cnn = test_net(net, p, image_cnn_name, options['nlabels'])
 
         results = check_dsc(label_names[i], image_cnn, options['nlabels'])
         dsc_string = c['g'] + '/'.join(['%f'] * len(results)) + c['nc']
