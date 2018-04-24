@@ -122,7 +122,7 @@ def parse_inputs():
     )
     parser.add_argument(
         '-N', '--net',
-        action='store', dest='net', default='unet',
+        action='store', dest='netname', default='unet',
         help='Typor of network architecture'
     )
     networks = {
@@ -131,7 +131,7 @@ def parse_inputs():
     }
 
     options = vars(parser.parse_args())
-    options['net'] = networks[options['net']]
+    options['net'] = networks[options['netname']]
 
     return options
 
@@ -282,8 +282,8 @@ def main():
     # Prepare the sufix that will be added to the results for the net and images
     filters_s = 'n'.join(['%d' % nf for nf in filters_list])
     conv_s = 'c'.join(['%d' % cs for cs in kernel_size_list])
-    params_s = (patch_width, conv_s, filters_s, epochs)
-    sufix = '.p%d.c%s.n%s.e%d' % params_s
+    params_s = (options['netname'], options['nlabels'], patch_width, conv_s, filters_s, epochs)
+    sufix = '.%s.l%d.p%d.c%s.n%s.e%d' % params_s
     train_data, _ = get_names_from_path(options)
 
     dsc_results = list()
