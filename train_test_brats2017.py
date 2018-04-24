@@ -156,7 +156,7 @@ def get_names_from_path(options):
 
 def check_dsc(gt_name, image, nlabels):
     gt_nii = load_nii(gt_name)
-    gt = np.minimum(gt_nii.get_data(), nlabels-1, dtype=np.uint8)
+    gt = np.minimum(gt_nii.get_data(), nlabels-1).astype(dtype=np.uint8)
     labels = np.unique(gt.flatten())
     return [dsc_seg(gt == l, image == l) for l in labels[1:]]
 
