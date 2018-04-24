@@ -86,7 +86,7 @@ def get_blocks(
     if verbose:
         print('%s- Loading y' % ' '.join([''] * 12))
     y = map(
-            lambda (l, lc): np.asarray(get_patches(l, lc, output_size), dtype=np.int8),
+            lambda (l, lc): np.minimum(get_patches(l, lc, output_size), nlabels - 1, dtype=np.int8),
             zip(labels_generator(label_names), centers)
         )
     y = map(

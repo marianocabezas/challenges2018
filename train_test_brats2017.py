@@ -116,6 +116,11 @@ def parse_inputs():
         help='Labels image sufix'
     )
     parser.add_argument(
+        '-L', '--n-labels',
+        dest='nlabels', type=int, default=5,
+        help='Number of labels (used to binarise classes)'
+    )
+    parser.add_argument(
         '-N', '--net',
         action='store', dest='net', default='unet',
         help='Typor of network architecture'
@@ -149,14 +154,14 @@ def get_names_from_path(options):
     return image_names, label_names
 
 
-def check_dsc(gt_name, image):
+def check_dsc(gt_name, image, nlabels):
     gt_nii = load_nii(gt_name)
-    gt = np.copy(gt_nii.get_data()).astype(dtype=np.uint8)
+    gt = np.minimum(gt_nii.get_data(), nlabels-1, dtype=np.uint8)
     labels = np.unique(gt.flatten())
     return [dsc_seg(gt == l, image == l) for l in labels[1:]]
 
 
-def train_net(net, image_names, label_names, train_centers, p, sufix):
+def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
     options = parse_inputs()
     patch_width = options['patch_width']
     patch_size = (patch_width, patch_width, patch_width)
@@ -195,7 +200,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix):
             centers=train_centers,
             patch_size=patch_size,
             output_size=patch_size,
-            nlabels=5,
+            nlabels=nlabels,
             verbose=True
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
@@ -290,10 +295,6 @@ def main():
         lambda names: get_bounding_blocks(load_nii(names[0]).get_data(), patch_width),
         image_names
     )
-    networks = {
-        'unet': get_brats_unet,
-        'invunet': get_brats_invunet
-    }
 
     print('%s[%s] %sStarting leave-one-out%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     for train_centers, i in leave_one_out(centers):
@@ -315,7 +316,7 @@ def main():
             input_shape=input_shape,
             filters_list=filters_list,
             kernel_size_list=kernel_size_list,
-            nlabels=5
+            nlabels=options['nlabels']
         )
         train_net(
             image_names=image_names,
@@ -323,7 +324,8 @@ def main():
             train_centers=train_centers,
             net=net,
             p=p,
-            sufix=sufix
+            sufix=sufix,
+            nlabels=nlabels
         )
 
         image_cnn_name = os.path.join(patient_path, p_name + '.cnn.test' + sufix)
@@ -332,7 +334,7 @@ def main():
         except IOError:
             image_cnn = test_net(net, p, image_cnn_name)
 
-        results = check_dsc(label_names[i], image_cnn)
+        results = check_dsc(label_names[i], image_cnn, options['nlabels'])
         dsc_string = c['g'] + '/'.join(['%f'] * len(results)) + c['nc']
         print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' FCNN DSC: ' +
               dsc_string % tuple(results))
