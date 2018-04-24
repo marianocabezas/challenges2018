@@ -325,7 +325,7 @@ def main():
             net=net,
             p=p,
             sufix=sufix,
-            nlabels=nlabels
+            nlabels=options['nlabels']
         )
 
         image_cnn_name = os.path.join(patient_path, p_name + '.cnn.test' + sufix)
