@@ -348,6 +348,7 @@ def main():
         ))
 
         # Training
+        print(image_names.shape)
         input_shape = (len(image_names),) + patch_size
         net = options['net'](
             input_shape=input_shape,
