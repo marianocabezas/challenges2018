@@ -95,3 +95,35 @@ def get_blocks(
     )
 
     return x, y
+
+
+def get_patches_roi(
+        image_names,
+        label_names,
+        roi,
+        nblocks,
+        nlabels,
+        datatype=np.float32,
+        verbose=False
+):
+    centers = get_bounding_blocks(roi, 3, 2)
+    if verbose:
+        print('%s- Loading x' % ' '.join([''] * 12))
+    x_d = filter(lambda z: z.any(), get_patches_list(image_names, centers, (3, 3, 3)))
+    x_d = map(lambda x_i: x_i.astype(dtype=datatype), x_d)
+
+    x_c = filter(lambda z: z.any(), get_patches_list(image_names, centers, (nblocks * 2 + 3,) * 3))
+    x_c = map(lambda x_i: x_i.astype(dtype=datatype), x_c)
+
+    if verbose:
+        print('%s- Loading y' % ' '.join([''] * 12))
+    y = map(
+            lambda (l, lc): np.minimum(map(lambda c: l[c], lc), nlabels - 1, dtype=np.int8),
+            zip(labels_generator(label_names), centers)
+        )
+    y = map(
+        lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+        y
+    )
+
+    return [x_d, x_c], y

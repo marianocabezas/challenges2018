@@ -66,6 +66,11 @@ def parse_inputs():
         help='Number of filters for each convolutional'
     )
     parser.add_argument(
+        '-d', '--dense-size',
+        dest='dense_size', type=int, default=256,
+        help='Number of units of the intermediate dense layer'
+    )
+    parser.add_argument(
         '-e', '--epochs',
         action='store', dest='epochs', type=int, default=10,
         help='Number of maximum epochs for training'
@@ -91,9 +96,19 @@ def parse_inputs():
         help='Maximum number of epochs without validation accuracy improvement'
     )
     parser.add_argument(
+        '--no-flair',
+        action='store_false', dest='use_flair', default=True,
+        help='Don''t use FLAIR'
+    )
+    parser.add_argument(
         '--flair',
         action='store', dest='flair', default='_flair.nii.gz',
         help='FLAIR sufix name'
+    )
+    parser.add_argument(
+        '--no-t1',
+        action='store_false', dest='use_t1', default=True,
+        help='Don''t use T1'
     )
     parser.add_argument(
         '--t1',
@@ -101,9 +116,19 @@ def parse_inputs():
         help='T1 sufix name'
     )
     parser.add_argument(
+        '--no-t1ce',
+        action='store_false', dest='use_t1ce', default=True,
+        help='Don''t use T1 with contrast'
+    )
+    parser.add_argument(
         '--t1ce',
         action='store', dest='t1ce', default='_t1ce.nii.gz',
         help='T1 with contrast enchancement sufix name'
+    )
+    parser.add_argument(
+        '--no-t2',
+        action='store_false', dest='use_t2', default=True,
+        help='Don''t use T2'
     )
     parser.add_argument(
         '--t2',
@@ -143,12 +168,19 @@ def get_names_from_path(options):
     patients = sorted(directories)
 
     # Prepare the names
-    flair_names = [os.path.join(path, p, p.split('/')[-1] + options['flair']) for p in patients]
-    t2_names = [os.path.join(path, p, p.split('/')[-1] + options['t2']) for p in patients]
-    t1_names = [os.path.join(path, p, p.split('/')[-1] + options['t1']) for p in patients]
-    t1ce_names = [os.path.join(path, p, p.split('/')[-1] + options['t1ce']) for p in patients]
+    def get_names(sufix):
+        return map(lambda p: os.path.join(path, p, p.split('/')[-1] + sufix), patients)
+    flair_names = get_names(options['flair']) if options['use_flair'] else None
+    # flair_names = [os.path.join(path, p, p.split('/')[-1] + options['flair']) for p in patients]
+    t2_names = get_names(options['t2']) if options['use_t2'] else None
+    # t2_names = [os.path.join(path, p, p.split('/')[-1] + options['t2']) for p in patients]
+    t1_names = get_names(options['t1']) if options['use_t1'] else None
+    # t1_names = [os.path.join(path, p, p.split('/')[-1] + options['t1']) for p in patients]
+    t1ce_names = get_names(options['t1ce']) if options['use_t1ce'] else None
+    # t1ce_names = [os.path.join(path, p, p.split('/')[-1] + options['t1ce']) for p in patients]
 
-    label_names = np.array([os.path.join(path, p, p.split('/')[-1] + options['labels']) for p in patients])
+    # label_names = np.array([os.path.join(path, p, p.split('/')[-1] + options['labels']) for p in patients])
+    label_names = np.array(get_names(options['labels']))
     image_names = np.stack(filter(None, [flair_names, t2_names, t1_names, t1ce_names]), axis=1)
 
     return image_names, label_names

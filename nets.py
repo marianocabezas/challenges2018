@@ -1,5 +1,5 @@
 from keras import backend as K
-from keras.layers import Conv3D, Dropout, Input, Conv3DTranspose, concatenate
+from keras.layers import Conv3D, Dropout, Input, Conv3DTranspose, Flatten, Dense, concatenate
 from keras.layers import Activation, Reshape, Permute
 from keras.models import Model
 
@@ -97,6 +97,49 @@ def get_brats_invunet(input_shape, filters_list, kernel_size_list, nlabels, drop
     curr_tensor = Reshape((nlabels, -1))(curr_tensor)
     curr_tensor = Permute((2, 1))(curr_tensor)
     outputs = Activation('softmax', name='seg')(curr_tensor)
+
+    net = Model(inputs=inputs, outputs=outputs)
+
+    net.compile(
+        optimizer='adadelta',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    return net
+
+
+def get_brats_cnn(filters_list, kernel_size_list, nlabels, dense_size, drop=0.5):
+    # Init
+    n_blocks = len(filters_list)
+    input_shape_d = (3, 3, 3)
+    input_shape_c = (n_blocks * 2 + 3,) * 3
+
+    inputs_d = Input(shape=input_shape_d, name='seg_inputs')
+    inputs_c = Input(shape=input_shape_c, name='seg_inputs')
+    inputs = [input_shape_d, input_shape_c]
+
+    tensor_d = inputs_d
+    tensor_c = inputs_c
+    for i, (filters, kernel_size) in enumerate(zip(filters_list, kernel_size_list)):
+        deconv = Conv3DTranspose(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        conv = Conv3D(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        tensor_d = Dropout(drop)(deconv(tensor_d))
+        tensor_c = Dropout(drop)(conv(tensor_c))
+
+    tensors = concatenate([Flatten()(tensor_d), Flatten()(tensor_c)])
+    tensors = Dense(dense_size, data_format='channels_first')(tensors)
+    outputs = Dense(nlabels, data_format='channels_first')(tensors)
 
     net = Model(inputs=inputs, outputs=outputs)
 
