@@ -314,8 +314,13 @@ def main():
     # Prepare the sufix that will be added to the results for the net and images
     filters_s = 'n'.join(['%d' % nf for nf in filters_list])
     conv_s = 'c'.join(['%d' % cs for cs in kernel_size_list])
-    params_s = (options['netname'], options['nlabels'], patch_width, conv_s, filters_s, epochs)
-    sufix = '.%s.l%d.p%d.c%s.n%s.e%d' % params_s
+    flair_s = '.noflair' if not options['use_flair'] else ''
+    t1_s = '.not1' if not options['use_t1'] else ''
+    t1ce_s = '.not1ce' if not options['use_t1ce'] else ''
+    t2_s = '.not2' if not options['use_t2'] else ''
+    images_s = flair_s + t1_s + t1ce_s + t2_s
+    params_s = (options['netname'], images_s, options['nlabels'], patch_width, conv_s, filters_s, epochs)
+    sufix = '.%s%s.l%d.p%d.c%s.n%s.e%d' % params_s
     train_data, _ = get_names_from_path(options)
 
     dsc_results = list()
