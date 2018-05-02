@@ -249,11 +249,6 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
             len(x)
         ))
 
-        idx = np.random.permutation(range(len(x)))
-
-        x = x[idx]
-        y = y[idx] if type(y) is list else map(lambda y_i: y_i[idx], y)
-
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
         if type(y) is not list:
             print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
@@ -262,6 +257,12 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
                 lambda y_i: print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y_i.shape)))),
                 y
             )
+
+        idx = np.random.permutation(range(len(x)))
+
+        x = x[idx]
+        y = y[idx] if type(y) is list else map(lambda y_i: y_i[idx], y)
+
         print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
         net.fit(x, y, batch_size=batch_size, validation_split=0.25, epochs=epochs, callbacks=callbacks)
         net.load_weights(os.path.join(patient_path, checkpoint))
