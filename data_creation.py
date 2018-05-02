@@ -104,7 +104,7 @@ def get_blocks(
             lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
             y
         )
-        y = [y_tumor, y_block]
+        y = (y_tumor, y_block)
 
     return x, y
 

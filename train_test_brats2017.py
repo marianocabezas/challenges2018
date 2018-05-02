@@ -243,7 +243,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
         x = np.concatenate(x)
-        y = np.concatenate(y) if type(y) is not list else map(np.concatenate, zip(*y))
+        y = np.concatenate(y) if type(y) is list else map(np.concatenate, y)
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
             len(x)
@@ -252,7 +252,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         idx = np.random.permutation(range(len(x)))
 
         x = x[idx]
-        y = y[idx] if type(y) is not list else map(lambda y_i: y_i[idx], y)
+        y = y[idx] if type(y) is list else map(lambda y_i: y_i[idx], y)
 
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
         if type(y) is not list:
