@@ -105,7 +105,7 @@ def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels = 2, d
     curr_tensor = Reshape((nlabels, -1))(curr_tensor)
     curr_tensor = Permute((2, 1))(curr_tensor)
     # Weight the output according to whether or not there is a tumor on that patch.
-    lambda_mult = Lambda(lambda x, y: x * y[-1])
+    lambda_mult = Lambda(lambda (x, y): x * y[-1])
     curr_tensor = lambda_mult ([curr_tensor, roi_out])
     block_out = Activation('softmax', name='seg')(curr_tensor)
     outputs = [roi_out, block_out]
