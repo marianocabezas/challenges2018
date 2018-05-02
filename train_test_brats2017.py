@@ -290,7 +290,7 @@ def test_net(net, p, outputname, nlabels):
         kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
 
         image_net = options['net'](x.shape[1:], filters_list, kernel_size_list, nlabels)
-        # We should copy the weights here
+        # We should copy the weights here (if not using roinet)
         for l_new, l_orig in zip(image_net.layers[1:], net.layers[1:]):
             l_new.set_weights(l_orig.get_weights())
 
