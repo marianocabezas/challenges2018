@@ -77,7 +77,8 @@ def get_blocks(
         output_size,
         nlabels,
         datatype=np.float32,
-        verbose=False
+        verbose=False,
+        roinet=False
 ):
     if verbose:
         print('%s- Loading x' % ' '.join([''] * 12))
@@ -89,10 +90,21 @@ def get_blocks(
             lambda (l, lc): np.minimum(get_patches(l, lc, output_size), nlabels - 1, dtype=np.int8),
             zip(labels_generator(label_names), centers)
         )
-    y = map(
-        lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
-        y
-    )
+    if not roinet:
+        y = map(
+            lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+            y
+        )
+    else:
+        y_tumor = map(
+            lambda y_i: keras.utils.to_categorical(np.min(y_i, axis=1), num_classes=nlabels),
+            y
+        )
+        y_block = map(
+            lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+            y
+        )
+        y = [y_tumor, y_block]
 
     return x, y
 

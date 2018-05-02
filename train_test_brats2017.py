@@ -8,7 +8,7 @@ from nibabel import load as load_nii
 from utils import color_codes
 from data_creation import get_bounding_blocks, get_blocks, load_images
 from data_manipulation.metrics import dsc_seg
-from nets import get_brats_unet, get_brats_invunet
+from nets import get_brats_unet, get_brats_invunet, get_brats_roinet
 from utils import leave_one_out
 
 
@@ -150,13 +150,18 @@ def parse_inputs():
         action='store', dest='netname', default='unet',
         help='Typor of network architecture'
     )
+
     networks = {
         'unet': get_brats_unet,
-        'invunet': get_brats_invunet
+        'invunet': get_brats_invunet,
+        'roinet': get_brats_roinet
     }
 
     options = vars(parser.parse_args())
     options['net'] = networks[options['netname']]
+
+    if options['netname'] is 'roinet':
+        options['nlabels'] = 2
 
     return options
 
@@ -233,11 +238,12 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
             patch_size=patch_size,
             output_size=patch_size,
             nlabels=nlabels,
-            verbose=True
+            verbose=True,
+            roinet=options['netname'] is 'roiname'
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
         x = np.concatenate(x)
-        y = np.concatenate(y)
+        y = np.concatenate(y) if type(y) is not list else map(np.concantenate, y)
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
             len(x)
@@ -246,11 +252,16 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         idx = np.random.permutation(range(len(x)))
 
         x = x[idx]
-        y = y[idx]
+        y = y[idx] if type(y) is not list else map(lambda y_i: y_i[idx], y)
 
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
-        print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
-
+        if type(y) is not list:
+            print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
+        else:
+            map(
+                lambda y_i: print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape)))),
+                y
+            )
         print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
         net.fit(x, y, batch_size=batch_size, validation_split=0.25, epochs=epochs, callbacks=callbacks)
         net.load_weights(os.path.join(patient_path, checkpoint))
