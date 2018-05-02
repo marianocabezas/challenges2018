@@ -259,7 +259,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
             print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
         else:
             map(
-                lambda y_i: print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape)))),
+                lambda y_i: print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y_i.shape)))),
                 y
             )
         print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
