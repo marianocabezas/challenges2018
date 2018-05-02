@@ -243,7 +243,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
         x = np.concatenate(x)
-        y = np.concatenate(y) if type(y) is not list else map(np.concatenate, y)
+        y = np.concatenate(y) if type(y) is not list else map(np.concatenate, zip(*y))
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
             len(x)
