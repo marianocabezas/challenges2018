@@ -231,7 +231,6 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
-        print(options['netname'], (options['netname'] is 'roiname'))
         x, y = get_blocks(
             image_names=image_names,
             label_names=label_names,
@@ -240,7 +239,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
             output_size=patch_size,
             nlabels=nlabels,
             verbose=True,
-            roinet=(options['netname'] is 'roiname')
+            roinet=(options['netname'] is 'roinet')
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
         x = np.concatenate(x)
