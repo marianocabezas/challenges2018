@@ -231,6 +231,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
+        roinet = (options['netname'] is 'roinet')
         x, y = get_blocks(
             image_names=image_names,
             label_names=label_names,
@@ -239,7 +240,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
             output_size=patch_size,
             nlabels=nlabels,
             verbose=True,
-            roinet=(options['netname'] is 'roinet')
+            roinet=roinet
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
         x = np.concatenate(x)
@@ -250,12 +251,14 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         ))
 
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
-        if type(y) is not list:
-            print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
+        if not roinet:
+            y_message = '%s-- Y shape: (%s)'
+            print(y_message % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
         else:
+            y_message = '%s-- Y_%d shape: (%s)'
             map(
-                lambda y_i: print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y_i.shape)))),
-                y
+                lambda (i, y_i): print(y_message % (i, ' '.join([''] * 12), ', '.join(map(str, y_i.shape)))),
+                enumerate(y)
             )
 
         idx = np.random.permutation(range(len(x)))
