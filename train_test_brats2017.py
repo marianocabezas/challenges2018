@@ -231,7 +231,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
-        roinet = ('roinet' in options['netname'])
+        roinet = ('roinet' == options['netname'])
         print(options['netname'], roinet)
         x, y = get_blocks(
             image_names=image_names,
