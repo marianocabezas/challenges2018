@@ -3,7 +3,7 @@ import numpy as np
 from nibabel import load as load_nii
 from data_manipulation.generate_features import get_patches
 from itertools import chain
-import keras
+from keras.utils import to_categorical
 from itertools import product
 
 
@@ -92,16 +92,16 @@ def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose
         )
     if not roinet:
         y = map(
-            lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+            lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
             y
         )
     else:
         y_tumor = map(
-            lambda y_i: keras.utils.to_categorical(np.min(y_i, axis=1), num_classes=nlabels),
+            lambda y_i: to_categorical(np.min(y_i.reshape((len(y_i), -1)), axis=1), num_classes=nlabels),
             y
         )
         y_block = map(
-            lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+            lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
             y
         )
         y = (y_tumor, y_block)

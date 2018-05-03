@@ -318,7 +318,7 @@ def test_net(net, p, outputname, nlabels):
             centers = get_bounding_blocks(load_nii(p[0]).get_data(), patch_width)
             x = get_data([p], centers, (patch_width,)*3, verbose=True)[0]
             y_pr_pred = net.predict(x, batch_size=options['batch_size'])
-
+            y_pred = np.argmax(y_pr_pred, axis=-1)
         roi_nii.get_data()[:] = image
         roi_nii.to_filename(outputname_path)
     return image
