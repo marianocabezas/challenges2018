@@ -315,7 +315,7 @@ def test_net(net, p, outputname, nlabels):
         else:
             patch_width = options['patch_width']
             nii_data = roi_nii.get_data()
-            centers = get_bounding_blocks(nii_data, patch_width)
+            centers = [get_bounding_blocks(nii_data, patch_width)]
             x = get_data([p], centers, (patch_width,)*3, verbose=True)[0]
             y_pr_pred = net.predict(x, batch_size=options['batch_size'])
             image = majority_voting_patches(y_pr_pred[-1], nii_data.shape, (patch_width,)*3, centers)
