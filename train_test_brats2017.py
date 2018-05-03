@@ -6,7 +6,7 @@ import numpy as np
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from nibabel import load as load_nii
 from utils import color_codes
-from data_creation import get_bounding_blocks, get_data, get_labels, load_images
+from data_creation import get_bounding_blocks, get_data, get_labels, load_images, majority_voting_patches
 from data_manipulation.metrics import dsc_seg
 from nets import get_brats_unet, get_brats_invunet, get_brats_roinet
 from utils import leave_one_out
@@ -314,11 +314,11 @@ def test_net(net, p, outputname, nlabels):
             image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
         else:
             patch_width = options['patch_width']
-            image = np.zeros_like(roi_nii.get_data(), dtype=np.uint8)
-            centers = get_bounding_blocks(load_nii(p[0]).get_data(), patch_width)
+            nii_data = roi_nii.get_data()
+            centers = get_bounding_blocks(nii_data, patch_width)
             x = get_data([p], centers, (patch_width,)*3, verbose=True)[0]
             y_pr_pred = net.predict(x, batch_size=options['batch_size'])
-            y_pred = np.argmax(y_pr_pred, axis=-1)
+            image = majority_voting_patches(y_pr_pred[-1], nii_data.shape, (patch_width,)*3, centers)
         roi_nii.get_data()[:] = image
         roi_nii.to_filename(outputname_path)
     return image

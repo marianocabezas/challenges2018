@@ -99,7 +99,7 @@ def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels = 2, d
 
     ''' Is there a tumor here? '''
     flat_tensor = Flatten()(curr_tensor)
-    roi_out = Dense(nlabels, activation='softmax')(flat_tensor)
+    roi_out = Dense(nlabels, activation='softmax', name='localizer')(flat_tensor)
 
     ''' Tumor segmentation'''
     curr_tensor = Reshape((nlabels, -1))(curr_tensor)

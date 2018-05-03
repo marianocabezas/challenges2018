@@ -133,8 +133,39 @@ def get_patches_roi(
             zip(labels_generator(label_names), centers)
         )
     y = map(
-        lambda y_i: keras.utils.to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+        lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
         y
     )
 
     return [x_d, x_c], y
+
+
+def majority_voting_patches(patches, image_size, patch_size, centers, datatype=np.uint8):
+    """
+    :param patches:
+    :param image_size:
+    :param patch_size:
+    :param centers:
+    :param datatype:
+    :return:
+    """
+
+    ''' Init '''
+    # Initial image.
+    image = np.zeros(image_size, dtype=np.float32)
+    image_explored = np.zeros(image_size, dtype=np.float32)
+
+    # We assume that the centers and their corresponding patches are inside the image boundaries.
+    slices = map(
+        lambda center: map(
+            lambda (c_idx, s_idx): slice(c_idx - s_idx / 2, c_idx + (s_idx - s_idx / 2)),
+            zip(center, patch_size)
+        ),
+        centers
+    )
+    for slice_i, patch_i in zip(slices, patches):
+        image[slice_i] += patch_i
+        image_explored[slice_i] += np.ones(patch_size)
+    image_explored[image_explored == 0] = 1
+    voting = np.divide(image, image_explored)
+    return (voting > 0.5).astype(dtype=datatype)
