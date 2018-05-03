@@ -6,7 +6,7 @@ import numpy as np
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from nibabel import load as load_nii
 from utils import color_codes
-from data_creation import get_bounding_blocks, get_blocks, load_images
+from data_creation import get_bounding_blocks, get_data, get_labels, load_images
 from data_manipulation.metrics import dsc_seg
 from nets import get_brats_unet, get_brats_invunet, get_brats_roinet
 from utils import leave_one_out
@@ -232,15 +232,19 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
         roinet = ('roinet' == options['netname'])
-        x, y = get_blocks(
+        x = get_data(
             image_names=image_names,
-            label_names=label_names,
             centers=train_centers,
             patch_size=patch_size,
+            verbose=True,
+        )
+        y = get_labels(
+            label_names=label_names,
+            centers=train_centers,
             output_size=patch_size,
             nlabels=nlabels,
-            verbose=True,
-            roinet=roinet
+            roinet=roinet,
+            verbose=True
         )
         print('%s- Concatenating the data' % ' '.join([''] * 12))
         x = np.concatenate(x)
@@ -257,7 +261,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         else:
             y_message = '%s-- Y_%d shape: (%s)'
             map(
-                lambda (i, y_i): print(y_message % (i, ' '.join([''] * 12), ', '.join(map(str, y_i.shape)))),
+                lambda (i, y_i): print(y_message % (' '.join([''] * 12), i, ', '.join(map(str, y_i.shape)))),
                 enumerate(y)
             )
 
@@ -283,29 +287,38 @@ def test_net(net, p, outputname, nlabels):
         image = load_nii(outputname_path).get_data()
         load_nii(roiname)
     except IOError:
-        # Image loading
-        x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
-
-        # Network parameters
-        conv_blocks = options['conv_blocks']
-        n_filters = options['n_filters']
-        filters_list = n_filters if len(n_filters) > 1 else n_filters * conv_blocks
-        conv_width = options['conv_width']
-        kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
-
-        image_net = options['net'](x.shape[1:], filters_list, kernel_size_list, nlabels)
-        # We should copy the weights here (if not using roinet)
-        for l_new, l_orig in zip(image_net.layers[1:], net.layers[1:]):
-            l_new.set_weights(l_orig.get_weights())
-
-        # Now we can test
-        print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-        # Load only the patient images
-        print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
-              (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-        pr_maps = image_net.predict(x, batch_size=options['batch_size'])
-        image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
+        roinet = ('roinet' == options['netname'])
         roi_nii = load_nii(p[0])
+        if not roinet:
+            # Image loading
+            x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
+
+            # Network parameters
+            conv_blocks = options['conv_blocks']
+            n_filters = options['n_filters']
+            filters_list = n_filters if len(n_filters) > 1 else n_filters * conv_blocks
+            conv_width = options['conv_width']
+            kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
+
+            image_net = options['net'](x.shape[1:], filters_list, kernel_size_list, nlabels)
+            # We should copy the weights here (if not using roinet)
+            for l_new, l_orig in zip(image_net.layers[1:], net.layers[1:]):
+                l_new.set_weights(l_orig.get_weights())
+
+            # Now we can test
+            print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+            # Load only the patient images
+            print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
+                  (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
+            pr_maps = image_net.predict(x, batch_size=options['batch_size'])
+            image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
+        else:
+            patch_width = options['patch_width']
+            image = np.zeros_like(roi_nii.get_data(), dtype=np.uint8)
+            centers = get_bounding_blocks(load_nii(p[0]).get_data(), patch_width)
+            x = get_data([p], centers, (patch_width,)*3, verbose=True)[0]
+            y_pr_pred = net.predict(x, batch_size=options['batch_size'])
+
         roi_nii.get_data()[:] = image
         roi_nii.to_filename(outputname_path)
     return image

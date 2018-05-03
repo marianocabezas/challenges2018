@@ -69,21 +69,21 @@ def norm(image):
     return (image - image_nonzero.mean()) / image_nonzero.std()
 
 
-def get_blocks(
+def get_data(
         image_names,
-        label_names,
         centers,
         patch_size,
-        output_size,
-        nlabels,
         datatype=np.float32,
-        verbose=False,
-        roinet=False
+        verbose=False
 ):
     if verbose:
         print('%s- Loading x' % ' '.join([''] * 12))
     x = filter(lambda z: z.any(), get_patches_list(image_names, centers, patch_size))
     x = map(lambda x_i: x_i.astype(dtype=datatype), x)
+    return x
+
+
+def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose=False):
     if verbose:
         print('%s- Loading y' % ' '.join([''] * 12))
     y = map(
@@ -105,8 +105,7 @@ def get_blocks(
             y
         )
         y = (y_tumor, y_block)
-
-    return x, y
+        return y
 
 
 def get_patches_roi(
