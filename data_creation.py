@@ -164,7 +164,7 @@ def majority_voting_patches(patches, image_size, patch_size, centers, datatype=n
         centers
     )
     for slice_i, patch_i in zip(slices, patches):
-        image[slice_i] += patch_i
+        image[slice_i] += patch_i[:, -1].reshape(patch_size)
         image_explored[slice_i] += np.ones(patch_size)
     image_explored[image_explored == 0] = 1
     voting = np.divide(image, image_explored)
