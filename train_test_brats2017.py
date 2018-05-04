@@ -317,7 +317,7 @@ def test_net(net, p, outputname, nlabels):
             nii_data = roi_nii.get_data()
             # Now we can test
             print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-            centers = get_bounding_blocks(nii_data, patch_width)
+            centers = get_bounding_blocks(nii_data, patch_width, overlap=patch_width-1)
             x = get_data([p], [centers], (patch_width,)*3, verbose=True)[0]
             y_pr_pred = net.predict(x, batch_size=options['batch_size'])
             # Load only the patient images
