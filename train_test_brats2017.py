@@ -323,7 +323,7 @@ def test_net(net, p, outputname, nlabels):
             # Load only the patient images
             print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
                   (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-            image = majority_voting_patches(y_pr_pred, nii_data.shape, (patch_width,)*3, centers)
+            image = majority_voting_patches(y_pr_pred[-1], nii_data.shape, (patch_width,)*3, centers)
         roi_nii.get_data()[:] = image
         roi_nii.to_filename(outputname_path)
     return image
