@@ -105,7 +105,7 @@ def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose
             y
         )
         y = (y_tumor, y_block)
-        return y
+    return y
 
 
 def get_patches_roi(
