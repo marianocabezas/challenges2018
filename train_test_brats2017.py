@@ -361,7 +361,7 @@ def main():
     print('%s[%s] %s<BRATS 2017 pipeline testing>%s' % (c['c'], strftime("%H:%M:%S"), c['y'], c['nc']))
     print('%s[%s] %sCenter computation%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     # Block center computation
-    overlap = 0 if options['netname'] != 'roinet' else patch_width / 2
+    overlap = 0 if options['netname'] != 'roinet' else patch_width / 4
     centers = map(
         lambda names: get_bounding_blocks(load_nii(names[0]).get_data(), patch_width, overlap=overlap),
         image_names
