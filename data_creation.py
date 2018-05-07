@@ -97,8 +97,8 @@ def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose
         )
     else:
         y_tumor = map(
-            lambda y_i: to_categorical(np.min(y_i.reshape((len(y_i), -1)), axis=1), num_classes=nlabels),
-            y
+            lambda (l, lc): to_categorical(np.minimum(l[lc], nlabels - 1, dtype=np.int8), num_classes=nlabels),
+            zip(labels_generator(label_names), centers)
         )
         y_block = map(
             lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
