@@ -98,7 +98,7 @@ def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose
     else:
         y_tumor = map(
             lambda (l, lc): to_categorical(
-                np.minimum(map(lambda c: l[c], nlabels - 1, lc), dtype=np.int8), num_classes=nlabels
+                np.minimum(map(lambda c: l[c], lc), nlabels - 1,  dtype=np.int8), num_classes=nlabels
             ),
             zip(labels_generator(label_names), centers)
         )
