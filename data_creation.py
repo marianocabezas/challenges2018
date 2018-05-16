@@ -4,7 +4,7 @@ from nibabel import load as load_nii
 from data_manipulation.generate_features import get_patches
 from itertools import chain
 from keras.utils import to_categorical
-from itertools import product
+from itertools import product, izip
 
 
 """
@@ -15,11 +15,11 @@ from itertools import product
 
 def labels_generator(image_names):
     for patient in image_names:
-        yield np.squeeze(load_nii(patient).get_data())
+        yield np.squeeze(np.asarray(load_nii(patient).dataobj))
 
 
 def load_images(image_names):
-    return map(lambda image: norm(load_nii(image).get_data()), image_names)
+    return map(lambda image: norm(np.asarray(load_nii(image).dataobj)), image_names)
 
 
 def get_bounding_blocks(mask, block_size, overlap=0):
@@ -50,10 +50,11 @@ def centers_and_idx(centers, n_images):
 
 
 def get_patches_list(list_of_image_names, centers_list, size):
+
     patch_list = [
         np.stack(
             map(
-                lambda image: get_patches(norm(load_nii(image).get_data()), centers, size),
+                lambda image: get_patches(norm(np.asarray(load_nii(image).dataobj)), centers, size),
                 image_names
             ),
             axis=1
@@ -71,24 +72,28 @@ def norm(image):
 
 def get_data(
         image_names,
-        centers,
+        list_of_centers,
         patch_size,
         datatype=np.float32,
         verbose=False
 ):
     if verbose:
         print('%s- Loading x' % ' '.join([''] * 12))
-    x = filter(lambda z: z.any(), get_patches_list(image_names, centers, patch_size))
+    x = filter(lambda z: z.any(), get_patches_list(image_names, list_of_centers, patch_size))
     x = map(lambda x_i: x_i.astype(dtype=datatype), x)
     return x
 
 
-def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose=False):
+def get_labels(label_names, list_of_centers, output_size, nlabels, roinet=False, verbose=False):
     if verbose:
         print('%s- Loading y' % ' '.join([''] * 12))
     y = map(
-            lambda (l, lc): np.minimum(get_patches(l, lc, output_size), nlabels - 1, dtype=np.int8),
-            zip(labels_generator(label_names), centers)
+            lambda (name, centers): np.minimum(
+                get_patches(load_nii(name).get_data(), centers, output_size),
+                nlabels - 1,
+                dtype=np.int8
+            ),
+            zip(label_names, list_of_centers)
         )
     if not roinet:
         y = map(
@@ -100,7 +105,7 @@ def get_labels(label_names, centers, output_size, nlabels, roinet=False, verbose
             lambda (l, lc): to_categorical(
                 np.minimum(map(lambda c: l[c], lc), nlabels - 1,  dtype=np.int8), num_classes=nlabels
             ),
-            zip(labels_generator(label_names), centers)
+            izip(labels_generator(label_names), list_of_centers)
         )
         y_block = map(
             lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
@@ -170,4 +175,4 @@ def majority_voting_patches(patches, image_size, patch_size, centers, datatype=n
         image_explored[slice_i] += np.ones(patch_size)
     image_explored[image_explored == 0] = 1
     voting = np.divide(image, image_explored)
-    return (voting > 0.5).astype(dtype=datatype)
+    return (voting > 0.5).astype(dtype=datatype), voting

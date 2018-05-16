@@ -10,6 +10,7 @@ from data_creation import get_bounding_blocks, get_data, get_labels, load_images
 from data_manipulation.metrics import dsc_seg
 from nets import get_brats_unet, get_brats_invunet, get_brats_roinet
 from utils import leave_one_out
+import gc
 
 
 def parse_inputs():
@@ -234,20 +235,22 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
         roinet = ('roinet' == options['netname'])
         x = get_data(
             image_names=image_names,
-            centers=train_centers,
+            list_of_centers=train_centers,
             patch_size=patch_size,
             verbose=True,
         )
+        print('%s- Concatenating the data' % ' '.join([''] * 12))
+        x = np.concatenate(x)
+
         y = get_labels(
             label_names=label_names,
-            centers=train_centers,
+            list_of_centers=train_centers,
             output_size=patch_size,
             nlabels=nlabels,
             roinet=roinet,
             verbose=True
         )
-        print('%s- Concatenating the data' % ' '.join([''] * 12))
-        x = np.concatenate(x)
+        print('%s- Concatenating the labels' % ' '.join([''] * 12))
         y = np.concatenate(y) if not roinet else map(np.concatenate, y)
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
@@ -265,6 +268,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
                 enumerate(y)
             )
 
+        print('%s- Randomising the training data' % ' '.join([''] * 12))
         idx = np.random.permutation(range(len(x)))
 
         x = x[idx]
@@ -284,7 +288,7 @@ def test_net(net, p, outputname, nlabels):
     outputname_path = os.path.join(patient_path, outputname + '.nii.gz')
     roiname = os.path.join(patient_path, outputname + '.roi.nii.gz')
     try:
-        image = load_nii(outputname_path).get_data()
+        roi_nii = load_nii(outputname_path)
         load_nii(roiname)
     except IOError:
         roinet = ('roinet' == options['netname'])
@@ -318,15 +322,19 @@ def test_net(net, p, outputname, nlabels):
             # Now we can test
             print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
             centers = get_bounding_blocks(nii_data, patch_width, overlap=(patch_width*2)/3)
-            x = get_data([p], [centers], (patch_width,)*3, verbose=True)[0]
-            y_pr_pred = net.predict(x, batch_size=options['batch_size'])
+            x_test = get_data([p], [centers], (patch_width,)*3, verbose=True)[0]
+            y_pr_pred = net.predict(x_test, batch_size=options['batch_size'])
             # Load only the patient images
             print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
                   (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-            image = majority_voting_patches(y_pr_pred[-1], nii_data.shape, (patch_width,)*3, centers)
+            # TODO: Get the probabilistic maps for both network outputs.
+            [x, y, z] = np.stack(centers, axis=1)
+            loc_pr = np.zeros_like(nii_data, dtype=np.float32)
+            loc_pr[x, y, z] = y_pr_pred[0][-1]
+            image, seg_pr = majority_voting_patches(y_pr_pred[-1], nii_data.shape, (patch_width,)*3, centers)
         roi_nii.get_data()[:] = image
         roi_nii.to_filename(outputname_path)
-    return image
+    return roi_nii
 
 
 def main():
@@ -401,11 +409,12 @@ def main():
 
         image_cnn_name = os.path.join(patient_path, p_name + '.cnn.test' + sufix)
         try:
-            image_cnn = load_nii(image_cnn_name + '.nii.gz').get_data()
+            image_cnn = load_nii(image_cnn_name + '.nii.gz')
         except IOError:
             image_cnn = test_net(net, p, image_cnn_name, options['nlabels'])
 
-        results = check_dsc(label_names[i], image_cnn, options['nlabels'])
+        results = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
+        image_cnn.uncache()
         dsc_string = c['g'] + '/'.join(['%f'] * len(results)) + c['nc']
         print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' FCNN DSC: ' +
               dsc_string % tuple(results))
