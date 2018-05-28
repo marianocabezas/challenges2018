@@ -290,10 +290,10 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, s
         y = np.concatenate(y)
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
-            len(x)
+            len(y)
         ))
 
-        print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
+        print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape)))) if type(x) is not list
         y_message = '%s-- Y shape: (%s)'
         print(y_message % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
 
