@@ -269,7 +269,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, s
             print('%s- Concatenating the data' % ' '.join([''] * 12))
             x_c = np.concatenate(x_c)
             print('%s- %d samples' % (' '.join([''] * 12), len(x_c)))
-            x = [x_d, x_c]
+            x = [x_c, x_d]
 
         if not seg:
             y = get_patch_labels(
