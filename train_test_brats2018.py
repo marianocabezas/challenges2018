@@ -502,11 +502,11 @@ def main():
         )
 
         dense_size = options['dense_size']
-
+        conv_blocks_seg = options['conv_blocks_seg']
         net = get_brats_cnn(
             n_channels=image_names.shape[-1],
-            filters_list=filters_list,
-            kernel_size_list=[conv_width] * options['conv_blocks_seg'],
+            filters_list=n_filters * conv_blocks_seg,
+            kernel_size_list=[conv_width] * conv_blocks_seg,
             nlabels=options['nlabels'],
             dense_size=dense_size
         )
