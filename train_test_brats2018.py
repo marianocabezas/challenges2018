@@ -292,7 +292,7 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, s
             ' '.join([''] * 12),
             len(y)
         ))
-        if type(x) is not list
+        if type(x) is not list:
             print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
         y_message = '%s-- Y shape: (%s)'
         print(y_message % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
