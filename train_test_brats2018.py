@@ -6,11 +6,10 @@ import numpy as np
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from nibabel import load as load_nii
 from utils import color_codes
-from data_creation import get_bounding_blocks, get_data, get_labels, load_images, majority_voting_patches
+from data_creation import get_mask_centers, get_bounding_centers, get_mask_blocks
+from data_creation import get_patch_labels, get_data, get_labels, load_images
 from data_manipulation.metrics import dsc_seg
-from nets import get_brats_unet, get_brats_invunet, get_brats_roinet
-from utils import leave_one_out
-import gc
+from nets import get_brats_unet, get_brats_invunet, get_brats_cnn
 
 
 def parse_inputs():
@@ -26,7 +25,7 @@ def parse_inputs():
     )
     group.add_argument(
         '-l', '--leave-one-out',
-        dest='loo_dir', default='/home/mariano/DATA/Brats17TrainingData',
+        dest='loo_dir', default='/home/mariano/DATA/Brats18TrainingData',
         help='Option to use leave-one-out. The second parameter is the folder with all the patients.'
     )
 
@@ -47,6 +46,11 @@ def parse_inputs():
         help='Number of convolutional layers'
     )
     parser.add_argument(
+        '-C', '--conv-blocks-seg',
+        dest='conv_blocks_seg', type=int, default=3,
+        help='Number of convolutional layers'
+    )
+    parser.add_argument(
         '-b', '--batch-size',
         dest='batch_size', type=int, default=128,
         help='Batch size for training'
@@ -58,7 +62,7 @@ def parse_inputs():
     )
     parser.add_argument(
         '-s', '--down-sampling',
-        dest='down_sampling', type=int, default=1,
+        dest='down_sampling', type=int, default=16,
         help='Downsampling ratio for the training data'
     )
     parser.add_argument(
@@ -155,7 +159,6 @@ def parse_inputs():
     networks = {
         'unet': get_brats_unet,
         'invunet': get_brats_invunet,
-        'roinet': get_brats_roinet
     }
 
     options = vars(parser.parse_args())
@@ -196,11 +199,13 @@ def check_dsc(gt_name, image, nlabels):
     gt_nii = load_nii(gt_name)
     gt = np.minimum(gt_nii.get_data(), nlabels-1).astype(dtype=np.uint8)
     labels = np.unique(gt.flatten())
+    gt_nii.uncache()
     return [dsc_seg(gt == l, image == l) for l in labels[1:]]
 
 
-def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
+def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, seg=False):
     options = parse_inputs()
+    conv_blocks = options['conv_blocks']
     patch_width = options['patch_width']
     patch_size = (patch_width, patch_width, patch_width)
     c = color_codes()
@@ -210,11 +215,8 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
     epochs = options['epochs']
     batch_size = options['batch_size']
 
-    print('%s[%s] %sTraining the network %s(%s%d %sparameters)' %
-          (c['c'], strftime("%H:%M:%S"), c['g'], c['nc'], c['b'], net.count_params(), c['nc']))
-    # net.summary()
-    net_name = os.path.join(patient_path, 'brats2017%s.mdl' % sufix)
-    checkpoint = 'brats2017%s.hdf5' % sufix
+    net_name = os.path.join(patient_path, 'brats2018%s.mdl' % sufix)
+    checkpoint = 'brats2018%s.hdf5' % sufix
 
     callbacks = [
         EarlyStopping(
@@ -232,71 +234,98 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels):
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
-        roinet = ('roinet' == options['netname'])
-        x = get_data(
-            image_names=image_names,
-            list_of_centers=train_centers,
-            patch_size=patch_size,
-            verbose=True,
+        print(
+            '%s[%s] %sTraining the network %s%s %s(%s%d %sparameters)' % (
+                c['c'], strftime("%H:%M:%S"), c['g'], c['b'], 'Unet' if not seg else 'CNN', c['nc'],
+                c['b'], net.count_params(), c['nc']
+            )
         )
-        print('%s- Concatenating the data' % ' '.join([''] * 12))
-        x = np.concatenate(x)
+        # net.summary()
+        if not seg:
+            x = get_data(
+                image_names=image_names,
+                list_of_centers=train_centers,
+                patch_size=patch_size,
+                verbose=True,
+            )
+            print('%s- Concatenating the data' % ' '.join([''] * 12))
+            x = np.concatenate(x)
+        else:
+            x_d = get_data(
+                image_names=image_names,
+                list_of_centers=train_centers,
+                patch_size=(options['conv_blocks_seg'] * 2 + 3,) * 3,
+                verbose=True,
+            )
+            print('%s- Concatenating the data' % ' '.join([''] * 12))
+            x_d = np.concatenate(x_d)
+            print('%s- %d samples' % (' '.join([''] * 12), len(x_d)))
+            x_c = get_data(
+                image_names=image_names,
+                list_of_centers=train_centers,
+                patch_size=(3, 3, 3),
+                verbose=True,
+            )
+            print('%s- Concatenating the data' % ' '.join([''] * 12))
+            x_c = np.concatenate(x_c)
+            print('%s- %d samples' % (' '.join([''] * 12), len(x_c)))
+            x = [x_d, x_c]
 
-        y = get_labels(
-            label_names=label_names,
-            list_of_centers=train_centers,
-            output_size=patch_size,
-            nlabels=nlabels,
-            roinet=roinet,
-            verbose=True
-        )
+        if not seg:
+            y = get_patch_labels(
+                label_names=label_names,
+                list_of_centers=train_centers,
+                output_size=patch_size,
+                nlabels=nlabels,
+                verbose=True
+            )
+        else:
+            y = get_labels(
+                label_names=label_names,
+                list_of_centers=train_centers,
+                nlabels=nlabels,
+                verbose=True
+            )
         print('%s- Concatenating the labels' % ' '.join([''] * 12))
-        y = np.concatenate(y) if not roinet else map(np.concatenate, y)
+        y = np.concatenate(y)
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
             len(x)
         ))
 
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
-        if not roinet:
-            y_message = '%s-- Y shape: (%s)'
-            print(y_message % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
-        else:
-            y_message = '%s-- Y_%d shape: (%s)'
-            map(
-                lambda (i, y_i): print(y_message % (' '.join([''] * 12), i, ', '.join(map(str, y_i.shape)))),
-                enumerate(y)
-            )
+        y_message = '%s-- Y shape: (%s)'
+        print(y_message % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
 
         print('%s- Randomising the training data' % ' '.join([''] * 12))
-        idx = np.random.permutation(range(len(x)))
+        idx = np.random.permutation(range(len(y)))
 
-        x = x[idx]
-        y = y[idx] if not roinet else map(lambda y_i: y_i[idx], y)
+        x = x[idx] if type(x) is not list else map(lambda xi: xi[idx], x)
+        y = y[idx]
 
         print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
         net.fit(x, y, batch_size=batch_size, validation_split=0.25, epochs=epochs, callbacks=callbacks)
         net.load_weights(os.path.join(patient_path, checkpoint))
 
 
-def test_net(net, p, outputname, nlabels):
+def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
 
     c = color_codes()
     options = parse_inputs()
     p_name = p[0].rsplit('/')[-2]
     patient_path = '/'.join(p[0].rsplit('/')[:-1])
     outputname_path = os.path.join(patient_path, outputname + '.nii.gz')
-    roiname = os.path.join(patient_path, outputname + '.roi.nii.gz')
     try:
         roi_nii = load_nii(outputname_path)
-        load_nii(roiname)
+        if verbose:
+            print('%s<%s%s%s%s - probability map loaded>%s' % (
+                c['g'], c['b'], p_name, c['nc'], c['g'], c['nc']
+            ))
     except IOError:
-        roinet = ('roinet' == options['netname'])
         roi_nii = load_nii(p[0])
-        if not roinet:
-            # Image loading
-            x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
-
+        # Image loading
+        x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
+        if mask is None:
             # Network parameters
             conv_blocks = options['conv_blocks']
             n_filters = options['n_filters']
@@ -310,28 +339,46 @@ def test_net(net, p, outputname, nlabels):
                 l_new.set_weights(l_orig.get_weights())
 
             # Now we can test
-            print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+            if verbose:
+                print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
             # Load only the patient images
-            print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
-                  (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-            pr_maps = image_net.predict(x, batch_size=options['batch_size'])
+            if verbose:
+                print('%s<Creating the probability map %s%s%s%s - %s%s%s %s>%s' % (
+                    c['g'],
+                    c['b'], p_name, c['nc'], c['g'],
+                    c['b'], outputname, c['nc'],
+                    c['g'], c['nc']
+                ))
+            pr_maps = image_net.predict(x, batch_size=options['test_size'])
             image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
         else:
-            patch_width = options['patch_width']
-            nii_data = roi_nii.get_data()
-            # Now we can test
-            print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-            centers = get_bounding_blocks(nii_data, patch_width, overlap=(patch_width*2)/3)
-            x_test = get_data([p], [centers], (patch_width,)*3, verbose=True)[0]
-            y_pr_pred = net.predict(x_test, batch_size=options['batch_size'])
-            # Load only the patient images
-            print('%s<Creating the probability map %s%s%s%s - %s%s%s' %
-                  (c['g'], c['b'], p_name, c['nc'], c['g'], c['b'], outputname, c['nc']))
-            # TODO: Get the probabilistic maps for both network outputs.
-            [x, y, z] = np.stack(centers, axis=1)
-            loc_pr = np.zeros_like(nii_data, dtype=np.float32)
-            loc_pr[x, y, z] = y_pr_pred[0][-1]
-            image, seg_pr = majority_voting_patches(y_pr_pred[-1], nii_data.shape, (patch_width,)*3, centers)
+            image = np.zeros_like(mask, dtype=np.int8)
+            options = parse_inputs()
+            conv_blocks = options['conv_blocks_seg']
+            test_centers = get_mask_blocks(mask)
+            x_d = get_data(
+                image_names=[p],
+                list_of_centers=[test_centers],
+                patch_size=(conv_blocks * 2 + 3,) * 3,
+                verbose=True,
+            )
+            if verbose:
+                print('%s- Concatenating the data x_d' % ' '.join([''] * 12))
+            x_d = np.concatenate(x_d)
+            x_c = get_data(
+                image_names=[p],
+                list_of_centers=[test_centers],
+                patch_size=(3, 3, 3),
+                verbose=True,
+            )
+            if verbose:
+                print('%s- Concatenating the data x_c' % ' '.join([''] * 12))
+            x_c = np.concatenate(x_c)
+            x = [x_d, x_c]
+            pr_maps = net.predict(x, batch_size=options['test_size'])
+            [x, y, z] = np.stack(test_centers, axis=1)
+            image[x, y, z] = np.argmax(pr_maps, axis=1).astype(dtype=np.int8)
+
         roi_nii.get_data()[:] = image
         roi_nii.to_filename(outputname_path)
     return roi_nii
@@ -364,20 +411,24 @@ def main():
     sufix = '.%s%s.l%d.p%d.c%s.n%s.e%d' % params_s
     train_data, _ = get_names_from_path(options)
 
-    dsc_results = list()
+    unet_seg_results = list()
+    unet_roi_results = list()
+    cnn_seg_results = list()
+    cnn_roi_results = list()
     image_names, label_names = get_names_from_path(options)
-    print('%s[%s] %s<BRATS 2017 pipeline testing>%s' % (c['c'], strftime("%H:%M:%S"), c['y'], c['nc']))
+    print('%s[%s] %s<BRATS 2018 pipeline testing>%s' % (c['c'], strftime("%H:%M:%S"), c['y'], c['nc']))
     print('%s[%s] %sCenter computation%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     # Block center computation
     overlap = 0 if options['netname'] != 'roinet' else patch_width / 4
-    centers = map(
-        lambda names: get_bounding_blocks(load_nii(names[0]).get_data(), patch_width, overlap=overlap),
-        image_names
-    )
+    brain_centers = get_bounding_centers(image_names, patch_width, overlap)
 
     print('%s[%s] %sStarting leave-one-out%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-    for train_centers, i in leave_one_out(centers):
+    for i in range(len(image_names)):
+        # Data separation
         p = image_names[i]
+        train_images = np.asarray(image_names.tolist()[:i] + image_names.tolist()[i + 1:])
+        train_labels = np.asarray(label_names.tolist()[:i] + label_names.tolist()[i + 1:])
+        train_centers = brain_centers[:i] + brain_centers[i + 1:]
         # Patient stuff
         p_name = p[0].rsplit('/')[-2]
         patient_path = '/'.join(p[0].rsplit('/')[:-1])
@@ -386,10 +437,11 @@ def main():
         print('%s%sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
             ' '.join([''] * 12), c['g'],
             c['b'], p_name, c['nc'],
-            c['c'], c['b'], i+1, c['nc'], c['c'], len(centers), c['nc']
+            c['c'], c['b'], i+1, c['nc'], c['c'], len(brain_centers), c['nc']
         ))
 
-        # Training
+        '''Tumor ROI stuff'''
+        # Training for the ROI
         input_shape = (image_names.shape[-1],) + patch_size
         net = options['net'](
             input_shape=input_shape,
@@ -398,8 +450,8 @@ def main():
             nlabels=options['nlabels']
         )
         train_net(
-            image_names=image_names,
-            label_names=label_names,
+            image_names=train_images,
+            label_names=train_labels,
             train_centers=train_centers,
             net=net,
             p=p,
@@ -407,22 +459,104 @@ def main():
             nlabels=options['nlabels']
         )
 
-        image_cnn_name = os.path.join(patient_path, p_name + '.cnn.test' + sufix)
-        try:
-            image_cnn = load_nii(image_cnn_name + '.nii.gz')
-        except IOError:
-            image_cnn = test_net(net, p, image_cnn_name, options['nlabels'])
+        # Testing for the ROI
+        image_unet = test_net(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
 
-        results = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
-        image_cnn.uncache()
-        dsc_string = c['g'] + '/'.join(['%f'] * len(results)) + c['nc']
-        print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' FCNN DSC: ' +
-              dsc_string % tuple(results))
+        seg_dsc = check_dsc(label_names[i], image_unet.get_data(), options['nlabels'])
+        roi_dsc = check_dsc(label_names[i], image_unet.get_data().astype(np.bool), 2)
 
-        dsc_results.append(results)
+        dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
+        print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' Unet DSC: ' +
+              dsc_string % tuple(seg_dsc + roi_dsc))
 
-    f_dsc = tuple(map(lambda k: np.array([dsc[k] for dsc in dsc_results if len(dsc) > i]).mean(), range(3)))
-    print('Final results DSC: (%f/%f/%f)' % f_dsc)
+        unet_seg_results.append(seg_dsc)
+        unet_roi_results.append(roi_dsc)
+
+        '''Tumor segmentation stuff'''
+        # Training for the tumor inside the ROI
+        # First we should retest each training image and get the test tumor mask
+        # and join it with the GT mask. This new mask after dilation will give us
+        # the training centers.
+        masks = map(
+            lambda (images, labels): np.logical_or(
+                test_net(
+                    net,
+                    images,
+                    p_name + '.test' + sufix,
+                    options['nlabels'],
+                    verbose=False
+                ).get_data().astype(np.bool),
+                load_nii(labels).get_data().astype(np.bool)
+            ),
+            zip(train_images, train_labels)
+        )
+
+        print('%s- Extracting centers from the tumor ROI' % ' '.join([''] * 12))
+        train_centers = get_mask_centers(masks)
+        train_centers = map(
+            lambda centers:  map(
+                tuple,
+                np.random.permutation(centers)[::options['down_sampling']].tolist()
+            ),
+            train_centers
+        )
+
+        dense_size = options['dense_size']
+
+        net = get_brats_cnn(
+            n_channels=image_names.shape[-1],
+            filters_list=filters_list,
+            kernel_size_list=[conv_width] * options['conv_blocks_seg'],
+            nlabels=options['nlabels'],
+            dense_size=dense_size
+        )
+        train_net(
+            image_names=train_images,
+            label_names=train_labels,
+            train_centers=train_centers,
+            net=net,
+            p=p,
+            sufix='%s.d%d' % (sufix, dense_size),
+            nlabels=options['nlabels'],
+            seg=True
+        )
+        # Testing for the tumor inside the ROI
+        image_cnn = test_net(
+            net,
+            p,
+            p_name + '.cnn.test' + sufix,
+            options['nlabels'],
+            mask=image_unet.get_data().astype(np.bool)
+        )
+
+        seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
+        roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
+
+        dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
+        print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
+              dsc_string % tuple(seg_dsc + roi_dsc))
+
+        cnn_seg_results.append(seg_dsc)
+        cnn_roi_results.append(roi_dsc)
+
+    unet_r_dsc = np.mean(unet_roi_results)
+    print('Final ROI results DSC: %f' % unet_r_dsc)
+    unet_f_dsc = tuple(map(
+        lambda k: np.mean(
+            [dsc[k] for dsc in unet_seg_results if len(dsc) > k]
+        ),
+        range(3)
+    ))
+    print('Final Unet results DSC: (%f/%f/%f)' % unet_f_dsc)
+    cnn_r_dsc = np.mean(cnn_roi_results)
+    print('Final ROI results DSC: %f' % cnn_r_dsc)
+    cnn_f_dsc = tuple(map(
+        lambda k: np.mean(
+            [dsc[k] for dsc in cnn_seg_results if len(dsc) > k]
+        ),
+        range(3)
+    ))
+    print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
 
 
 if __name__ == '__main__':

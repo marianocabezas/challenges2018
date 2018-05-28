@@ -1,10 +1,10 @@
 from __future__ import print_function
 import numpy as np
 from nibabel import load as load_nii
-from data_manipulation.generate_features import get_patches
-from itertools import chain
+from scipy.ndimage.morphology import binary_dilation as imdilate
+from itertools import chain, product, izip
 from keras.utils import to_categorical
-from itertools import product, izip
+from data_manipulation.generate_features import get_patches, get_mask_voxels
 
 
 """
@@ -22,14 +22,27 @@ def load_images(image_names):
     return map(lambda image: norm(np.asarray(load_nii(image).dataobj)), image_names)
 
 
-def get_bounding_blocks(mask, block_size, overlap=0):
+def get_bounding_centers(image_names, patch_width, overlap=0, offset=0):
+    list_of_centers = map(
+        lambda names: get_bounding_blocks(
+            load_nii(names[0]).get_data(),
+            patch_width,
+            overlap=overlap,
+            offset=offset
+        ),
+        image_names
+    )
+    return list_of_centers
+
+
+def get_bounding_blocks(mask, block_size, overlap=0, offset=0):
     # Init
     half_size = block_size / 2
     overlap = min(overlap, block_size-1)
 
     # Bounding box
-    min_coord = np.stack(np.nonzero(mask.astype(dtype=np.bool))).min(axis=1)
-    max_coord = np.stack(np.nonzero(mask.astype(dtype=np.bool))).max(axis=1)
+    min_coord = np.stack(np.nonzero(mask.astype(dtype=np.bool))).min(axis=1) - offset
+    max_coord = np.stack(np.nonzero(mask.astype(dtype=np.bool))).max(axis=1) + offset
 
     # Centers
     global_centers = map(
@@ -38,6 +51,15 @@ def get_bounding_blocks(mask, block_size, overlap=0):
     )
 
     return list(product(*global_centers))
+
+
+def get_mask_centers(masks, dilation=2):
+    list_of_centers = map(lambda mask: get_mask_blocks(mask, dilation=dilation), masks)
+    return list_of_centers
+
+
+def get_mask_blocks(mask, dilation=2):
+    return get_mask_voxels(imdilate(mask, iterations=dilation))
 
 
 def centers_and_idx(centers, n_images):
@@ -50,7 +72,6 @@ def centers_and_idx(centers, n_images):
 
 
 def get_patches_list(list_of_image_names, centers_list, size):
-
     patch_list = [
         np.stack(
             map(
@@ -84,34 +105,39 @@ def get_data(
     return x
 
 
-def get_labels(label_names, list_of_centers, output_size, nlabels, roinet=False, verbose=False):
+def get_labels(label_names, list_of_centers, nlabels, verbose=False):
     if verbose:
         print('%s- Loading y' % ' '.join([''] * 12))
     y = map(
-            lambda (name, centers): np.minimum(
-                get_patches(load_nii(name).get_data(), centers, output_size),
+            lambda (labels, centers): np.minimum(
+                map(lambda c: labels[c], centers),
                 nlabels - 1,
                 dtype=np.int8
             ),
-            zip(label_names, list_of_centers)
+            izip(labels_generator(label_names), list_of_centers)
         )
-    if not roinet:
-        y = map(
-            lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
-            y
-        )
-    else:
-        y_tumor = map(
-            lambda (l, lc): to_categorical(
-                np.minimum(map(lambda c: l[c], lc), nlabels - 1,  dtype=np.int8), num_classes=nlabels
+    y = map(
+        lambda y_i: to_categorical(y_i, num_classes=nlabels),
+        y
+    )
+    return y
+
+
+def get_patch_labels(label_names, list_of_centers, output_size, nlabels, verbose=False):
+    if verbose:
+        print('%s- Loading y' % ' '.join([''] * 12))
+    y = map(
+            lambda (labels, centers): np.minimum(
+                get_patches(labels, centers, output_size),
+                nlabels - 1,
+                dtype=np.int8
             ),
             izip(labels_generator(label_names), list_of_centers)
         )
-        y_block = map(
-            lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
-            y
-        )
-        y = (y_tumor, y_block)
+    y = map(
+        lambda y_i: to_categorical(y_i, num_classes=nlabels).reshape((len(y_i), -1, nlabels)),
+        y
+    )
     return y
 
 
@@ -145,6 +171,16 @@ def get_patches_roi(
     )
 
     return [x_d, x_c], y
+
+
+def downsample_centers(list_of_centers, step):
+    n_images = len(list_of_centers)
+    map(
+        a,
+        list_of_centers
+    )
+
+    return final_centers
 
 
 def majority_voting_patches(patches, image_size, patch_size, centers, datatype=np.uint8):

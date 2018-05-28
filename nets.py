@@ -9,7 +9,7 @@ def dsc_loss(y_true, y_pred):
     return 1 - 2 * dsc_class[0]
 
 
-def get_brats_unet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.5):
+def get_brats_unet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.2):
     inputs = Input(shape=input_shape, name='seg_inputs')
 
     curr_tensor = inputs
@@ -59,7 +59,7 @@ def get_brats_unet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.
     return net
 
 
-def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels = 2, drop=0.5):
+def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels = 2, drop=0.2):
     # Input
     inputs = Input(shape=input_shape, name='seg_inputs')
 
@@ -121,7 +121,7 @@ def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels = 2, d
     return net
 
 
-def get_brats_invunet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.5):
+def get_brats_invunet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.2):
     inputs = Input(shape=input_shape, name='seg_inputs')
 
     curr_tensor = inputs
@@ -171,15 +171,15 @@ def get_brats_invunet(input_shape, filters_list, kernel_size_list, nlabels, drop
     return net
 
 
-def get_brats_cnn(filters_list, kernel_size_list, nlabels, dense_size, drop=0.5):
+def get_brats_cnn(n_channels, filters_list, kernel_size_list, nlabels, dense_size, drop=0.2):
     # Init
     n_blocks = len(filters_list)
-    input_shape_d = (3, 3, 3)
-    input_shape_c = (n_blocks * 2 + 3,) * 3
+    input_shape_d = (n_channels, 3, 3, 3)
+    input_shape_c = (n_channels,) + (n_blocks * 2 + 3,) * 3
 
-    inputs_d = Input(shape=input_shape_d, name='seg_inputs')
-    inputs_c = Input(shape=input_shape_c, name='seg_inputs')
-    inputs = [input_shape_d, input_shape_c]
+    inputs_d = Input(shape=input_shape_d, name='d_inputs')
+    inputs_c = Input(shape=input_shape_c, name='c_inputs')
+    inputs = [inputs_d, inputs_c]
 
     tensor_d = inputs_d
     tensor_c = inputs_c
@@ -199,9 +199,22 @@ def get_brats_cnn(filters_list, kernel_size_list, nlabels, dense_size, drop=0.5)
         tensor_d = Dropout(drop)(deconv(tensor_d))
         tensor_c = Dropout(drop)(conv(tensor_c))
 
+    tensor_d = Conv3D(
+        dense_size,
+        kernel_size=tuple(map(lambda x: x-1, K.int_shape(tensor_d)[2:])),
+        activation='relu',
+        data_format='channels_first',
+        name='d_dense'
+    )(tensor_d)
+    tensor_c = Conv3D(
+        dense_size,
+        kernel_size=tuple(map(lambda x: x-1, K.int_shape(tensor_c)[2:])),
+        activation='relu',
+        data_format='channels_first',
+        name='c_dense'
+    )(tensor_c)
     tensors = concatenate([Flatten()(tensor_d), Flatten()(tensor_c)])
-    tensors = Dense(dense_size, data_format='channels_first')(tensors)
-    outputs = Dense(nlabels, data_format='channels_first')(tensors)
+    outputs = Dense(nlabels)(tensors)
 
     net = Model(inputs=inputs, outputs=outputs)
 
