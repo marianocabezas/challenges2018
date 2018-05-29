@@ -374,7 +374,7 @@ def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
             if verbose:
                 print('%s- Concatenating the data x_c' % ' '.join([''] * 12))
             x_c = np.concatenate(x_c)
-            x = [x_d, x_c]
+            x = [x_c, x_d]
             pr_maps = net.predict(x, batch_size=options['test_size'])
             [x, y, z] = np.stack(test_centers, axis=1)
             image[x, y, z] = np.argmax(pr_maps, axis=1).astype(dtype=np.int8)
