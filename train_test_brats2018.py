@@ -318,8 +318,8 @@ def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
     try:
         roi_nii = load_nii(outputname_path)
         if verbose:
-            print('%s<%s%s%s%s - probability map loaded>%s' % (
-                c['g'], c['b'], p_name, c['nc'], c['g'], c['nc']
+            print('%s%s<%s%s%s%s - probability map loaded>%s' % (
+                ''.join([' '] * 14), c['g'], c['b'], p_name, c['nc'], c['g'], c['nc']
             ))
     except IOError:
         roi_nii = load_nii(p[0])
@@ -343,7 +343,8 @@ def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
                 print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
             # Load only the patient images
             if verbose:
-                print('%s<Creating the probability map %s%s%s%s - %s%s%s %s>%s' % (
+                print('%s%s<Creating the probability map %s%s%s%s - %s%s%s %s>%s' % (
+                    ''.join([' '] * 14),
                     c['g'],
                     c['b'], p_name, c['nc'], c['g'],
                     c['b'], outputname, c['nc'],
@@ -477,67 +478,70 @@ def main():
         # First we should retest each training image and get the test tumor mask
         # and join it with the GT mask. This new mask after dilation will give us
         # the training centers.
-        masks = map(
-            lambda (images, labels): np.logical_or(
-                test_net(
-                    net,
-                    images,
-                    p_name + '.test' + sufix,
-                    options['nlabels'],
-                    verbose=False
-                ).get_data().astype(np.bool),
-                load_nii(labels).get_data().astype(np.bool)
-            ),
-            zip(train_images, train_labels)
-        )
+        # print('%s%s<Creating the tumor masks for the training data>%s' % (
+        #             ''.join([' '] * 14), c['g'], c['nc']
+        #         ))
+        # masks = map(
+        #     lambda (images, labels): np.logical_or(
+        #         test_net(
+        #             net,
+        #             images,
+        #             p_name + '.test' + sufix,
+        #             options['nlabels'],
+        #             verbose=False
+        #         ).get_data().astype(np.bool),
+        #         load_nii(labels).get_data().astype(np.bool)
+        #     ),
+        #     zip(train_images, train_labels)
+        # )
 
-        print('%s- Extracting centers from the tumor ROI' % ' '.join([''] * 12))
-        train_centers = get_mask_centers(masks)
-        train_centers = map(
-            lambda centers:  map(
-                tuple,
-                np.random.permutation(centers)[::options['down_sampling']].tolist()
-            ),
-            train_centers
-        )
-
-        dense_size = options['dense_size']
-        conv_blocks_seg = options['conv_blocks_seg']
-        net = get_brats_cnn(
-            n_channels=image_names.shape[-1],
-            filters_list=n_filters * conv_blocks_seg,
-            kernel_size_list=[conv_width] * conv_blocks_seg,
-            nlabels=options['nlabels'],
-            dense_size=dense_size
-        )
-        train_net(
-            image_names=train_images,
-            label_names=train_labels,
-            train_centers=train_centers,
-            net=net,
-            p=p,
-            sufix='%s.d%d' % (sufix, dense_size),
-            nlabels=options['nlabels'],
-            seg=True
-        )
-        # Testing for the tumor inside the ROI
-        image_cnn = test_net(
-            net,
-            p,
-            p_name + '.cnn.test' + sufix,
-            options['nlabels'],
-            mask=image_unet.get_data().astype(np.bool)
-        )
-
-        seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
-        roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
-
-        dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
-        print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
-              dsc_string % tuple(seg_dsc + roi_dsc))
-
-        cnn_seg_results.append(seg_dsc)
-        cnn_roi_results.append(roi_dsc)
+        # print('%s- Extracting centers from the tumor ROI' % ' '.join([''] * 12))
+        # train_centers = get_mask_centers(masks)
+        # train_centers = map(
+        #     lambda centers:  map(
+        #         tuple,
+        #         np.random.permutation(centers)[::options['down_sampling']].tolist()
+        #     ),
+        #     train_centers
+        # )
+        #
+        # dense_size = options['dense_size']
+        # conv_blocks_seg = options['conv_blocks_seg']
+        # net = get_brats_cnn(
+        #     n_channels=image_names.shape[-1],
+        #     filters_list=n_filters * conv_blocks_seg,
+        #     kernel_size_list=[conv_width] * conv_blocks_seg,
+        #     nlabels=options['nlabels'],
+        #     dense_size=dense_size
+        # )
+        # train_net(
+        #     image_names=train_images,
+        #     label_names=train_labels,
+        #     train_centers=train_centers,
+        #     net=net,
+        #     p=p,
+        #     sufix='%s.d%d' % (sufix, dense_size),
+        #     nlabels=options['nlabels'],
+        #     seg=True
+        # )
+        # # Testing for the tumor inside the ROI
+        # image_cnn = test_net(
+        #     net,
+        #     p,
+        #     p_name + '.cnn.test' + sufix,
+        #     options['nlabels'],
+        #     mask=image_unet.get_data().astype(np.bool)
+        # )
+        #
+        # seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
+        # roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
+        #
+        # dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
+        # print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
+        #       dsc_string % tuple(seg_dsc + roi_dsc))
+        #
+        # cnn_seg_results.append(seg_dsc)
+        # cnn_roi_results.append(roi_dsc)
 
     unet_r_dsc = np.mean(unet_roi_results)
     print('Final ROI results DSC: %f' % unet_r_dsc)
@@ -548,15 +552,15 @@ def main():
         range(3)
     ))
     print('Final Unet results DSC: (%f/%f/%f)' % unet_f_dsc)
-    cnn_r_dsc = np.mean(cnn_roi_results)
-    print('Final ROI results DSC: %f' % cnn_r_dsc)
-    cnn_f_dsc = tuple(map(
-        lambda k: np.mean(
-            [dsc[k] for dsc in cnn_seg_results if len(dsc) > k]
-        ),
-        range(3)
-    ))
-    print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
+    # cnn_r_dsc = np.mean(cnn_roi_results)
+    # print('Final ROI results DSC: %f' % cnn_r_dsc)
+    # cnn_f_dsc = tuple(map(
+    #     lambda k: np.mean(
+    #         [dsc[k] for dsc in cnn_seg_results if len(dsc) > k]
+    #     ),
+    #     range(3)
+    # ))
+    # print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
 
 
 if __name__ == '__main__':

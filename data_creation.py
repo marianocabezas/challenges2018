@@ -173,15 +173,6 @@ def get_patches_roi(
     return [x_d, x_c], y
 
 
-def downsample_centers(list_of_centers, step):
-    n_images = len(list_of_centers)
-    map(
-        a,
-        list_of_centers
-    )
-
-    return final_centers
-
 
 def majority_voting_patches(patches, image_size, patch_size, centers, datatype=np.uint8):
     """
