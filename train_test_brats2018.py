@@ -435,9 +435,9 @@ def main():
         patient_path = '/'.join(p[0].rsplit('/')[:-1])
 
         # Data stuff
-        print('%s%sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
-            ' '.join([''] * 12), c['g'],
-            c['b'], p_name, c['nc'],
+        print('%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
+            c['c'], strftime("%H:%M:%S"),
+            c['g'], c['b'], p_name, c['nc'],
             c['c'], c['b'], i+1, c['nc'], c['c'], len(brain_centers), c['nc']
         ))
 
@@ -478,22 +478,22 @@ def main():
         # First we should retest each training image and get the test tumor mask
         # and join it with the GT mask. This new mask after dilation will give us
         # the training centers.
-        # print('%s%s<Creating the tumor masks for the training data>%s' % (
-        #             ''.join([' '] * 14), c['g'], c['nc']
-        #         ))
-        # masks = map(
-        #     lambda (images, labels): np.logical_or(
-        #         test_net(
-        #             net,
-        #             images,
-        #             p_name + '.test' + sufix,
-        #             options['nlabels'],
-        #             verbose=False
-        #         ).get_data().astype(np.bool),
-        #         load_nii(labels).get_data().astype(np.bool)
-        #     ),
-        #     zip(train_images, train_labels)
-        # )
+        print('%s%s<Creating the tumor masks for the training data>%s' % (
+                    ''.join([' '] * 14), c['g'], c['nc']
+                ))
+        masks = map(
+            lambda (images, labels): np.logical_or(
+                test_net(
+                    net,
+                    images,
+                    p_name + '.test' + sufix,
+                    options['nlabels'],
+                    verbose=False
+                ).get_data().astype(np.bool),
+                load_nii(labels).get_data().astype(np.bool)
+            ),
+            zip(train_images, train_labels)
+        )
 
         # print('%s- Extracting centers from the tumor ROI' % ' '.join([''] * 12))
         # train_centers = get_mask_centers(masks)
