@@ -233,12 +233,9 @@ def get_fcnn_labels(centers, names, nlabels, patch_size=None):
 def get_cluster_labels(centers, names, nlabels):
     options = parse_inputs()
     conv_blocks = options['conv_blocks_seg']
-    patch_width = options['patch_width']
-    patch_size_unet = (patch_width, patch_width, patch_width)
-    patch_size_fcnn = (conv_blocks * 2 + 3,) * 3
     y_cnn = get_cnn_labels(centers, names, nlabels)
-    y_fcnn = get_fcnn_labels(centers, names, nlabels, patch_size_fcnn)
-    y_unet = get_fcnn_labels(centers, names, nlabels, patch_size_unet)
+    y_fcnn = get_fcnn_labels(centers, names, nlabels, (3, 3, 3))
+    y_unet = get_fcnn_labels(centers, names, nlabels, (conv_blocks * 2 + 3,) * 3)
 
     y = [y_unet, y_cnn, y_fcnn, y_cnn]
 
