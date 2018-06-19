@@ -300,6 +300,8 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, n
         ))
         print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
         if type(y) is not list:
+            print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
+        else:
             y_message = '%s-- Y shape: (%s)'
             for yi in y:
                 print(y_message % (' '.join([''] * 12), ', '.join(map(str, yi.shape))))
