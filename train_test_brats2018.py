@@ -9,7 +9,7 @@ from utils import color_codes
 from data_creation import get_mask_centers, get_bounding_centers, get_mask_blocks
 from data_creation import get_patch_labels, get_data, get_labels, load_images
 from data_manipulation.metrics import dsc_seg
-from nets import get_brats_unet, get_brats_invunet, get_brats_cnn
+from nets import get_brats_unet, get_brats_invunet, get_brats_ensemble
 
 
 def parse_inputs():
@@ -203,11 +203,53 @@ def check_dsc(gt_name, image, nlabels):
     return [dsc_seg(gt == l, image == l) for l in labels[1:]]
 
 
-def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, seg=False):
+def get_cnn_labels(centers, names, nlabels):
+    y = get_labels(
+        label_names=names,
+        list_of_centers=centers,
+        nlabels=nlabels,
+        verbose=True
+    )
+    print('%s- Concatenating the labels (cnn)' % ' '.join([''] * 12))
+    y = np.concatenate(y)
+    return y
+
+
+def get_fcnn_labels(centers, names, nlabels, patch_size=None):
+    if patch_size is None:
+        patch_size = (parse_inputs()['patch_width'],) * 3
+    y = get_patch_labels(
+        label_names=names,
+        list_of_centers=centers,
+        output_size=patch_size,
+        nlabels=nlabels,
+        verbose=True
+    )
+    print('%s- Concatenating the labels (fcnn)' % ' '.join([''] * 12))
+    y = np.concatenate(y)
+    return y
+
+
+def get_cluster_labels(centers, names, nlabels):
     options = parse_inputs()
-    conv_blocks = options['conv_blocks']
+    conv_blocks = options['conv_blocks_seg']
     patch_width = options['patch_width']
-    patch_size = (patch_width, patch_width, patch_width)
+    patch_size_unet = (patch_width, patch_width, patch_width)
+    patch_size_fcnn = (conv_blocks * 2 + 3,) * 3
+    y_cnn = get_cnn_labels(centers, names, nlabels)
+    y_fcnn = get_fcnn_labels(centers, names, nlabels, patch_size_fcnn)
+    y_unet = get_fcnn_labels(centers, names, nlabels, patch_size_unet)
+
+    y = [y_unet, y_cnn, y_fcnn, y_cnn]
+
+    return y
+
+
+def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, net_type='unet'):
+    options = parse_inputs()
+    conv_blocks = options['conv_blocks_seg']
+    patch_width = options['patch_width']
+    patch_size = (patch_width,) * 3 if net_type == 'unet' else (conv_blocks * 2 + 3,) * 3
     c = color_codes()
     # Data stuff
     patient_path = '/'.join(p[0].rsplit('/')[:-1])
@@ -216,8 +258,9 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, s
     batch_size = options['batch_size']
 
     net_name = os.path.join(patient_path, 'brats2018%s.mdl' % sufix)
-    checkpoint = 'brats2018%s.hdf5' % sufix
+    net.save(net_name)
 
+    checkpoint = 'brats2018%s.hdf5' % sufix
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
@@ -229,79 +272,46 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, s
             save_best_only=True
         )
     ]
-    net.save(net_name)
 
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
         print(
             '%s[%s] %sTraining the network %s%s %s(%s%d %sparameters)' % (
-                c['c'], strftime("%H:%M:%S"), c['g'], c['b'], 'Unet' if not seg else 'CNN', c['nc'],
+                c['c'], strftime("%H:%M:%S"), c['g'], c['b'], net_type, c['nc'],
                 c['b'], net.count_params(), c['nc']
             )
         )
         # net.summary()
-        if not seg:
-            x = get_data(
-                image_names=image_names,
-                list_of_centers=train_centers,
-                patch_size=patch_size,
-                verbose=True,
-            )
-            print('%s- Concatenating the data' % ' '.join([''] * 12))
-            x = np.concatenate(x)
-        else:
-            x_d = get_data(
-                image_names=image_names,
-                list_of_centers=train_centers,
-                patch_size=(options['conv_blocks_seg'] * 2 + 3,) * 3,
-                verbose=True,
-            )
-            print('%s- Concatenating the data' % ' '.join([''] * 12))
-            x_d = np.concatenate(x_d)
-            print('%s- %d samples' % (' '.join([''] * 12), len(x_d)))
-            x_c = get_data(
-                image_names=image_names,
-                list_of_centers=train_centers,
-                patch_size=(3, 3, 3),
-                verbose=True,
-            )
-            print('%s- Concatenating the data' % ' '.join([''] * 12))
-            x_c = np.concatenate(x_c)
-            print('%s- %d samples' % (' '.join([''] * 12), len(x_c)))
-            x = [x_c, x_d]
-
-        if not seg:
-            y = get_patch_labels(
-                label_names=label_names,
-                list_of_centers=train_centers,
-                output_size=patch_size,
-                nlabels=nlabels,
-                verbose=True
-            )
-        else:
-            y = get_labels(
-                label_names=label_names,
-                list_of_centers=train_centers,
-                nlabels=nlabels,
-                verbose=True
-            )
-        print('%s- Concatenating the labels' % ' '.join([''] * 12))
-        y = np.concatenate(y)
+        x = get_data(
+            image_names=image_names,
+            list_of_centers=train_centers,
+            patch_size=patch_size,
+            verbose=True,
+        )
+        print('%s- Concatenating the data' % ' '.join([''] * 12))
+        x = np.concatenate(x)
+        get_labels_dict = {
+            'unet': lambda: get_fcnn_labels(train_centers, label_names, nlabels),
+            'ensemble': lambda: get_cnn_labels(train_centers, label_names, nlabels),
+            'nets': lambda: get_cluster_labels(train_centers, label_names, nlabels),
+        }
+        y = get_labels_dict[net_type]()
         print('%s-- Using %d blocks of data' % (
             ' '.join([''] * 12),
-            len(y)
+            len(x)
         ))
-        if type(x) is not list:
-            print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
-        y_message = '%s-- Y shape: (%s)'
-        print(y_message % (' '.join([''] * 12), ', '.join(map(str, y.shape))))
+        print('%s-- X shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x.shape))))
+        if type(y) is not list:
+            y_message = '%s-- Y shape: (%s)'
+            for yi in y:
+                print(y_message % (' '.join([''] * 12), ', '.join(map(str, yi.shape))))
 
         print('%s- Randomising the training data' % ' '.join([''] * 12))
-        idx = np.random.permutation(range(len(y)))
+        idx = np.random.permutation(range(len(x)))
 
-        x = x[idx] if type(x) is not list else map(lambda xi: xi[idx], x)
-        y = y[idx]
+        x = x[idx]
+        y = y[idx] if type(y) is not list else map(lambda yi: yi[idx], y)
 
         print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
         net.fit(x, y, batch_size=batch_size, validation_split=0.25, epochs=epochs, callbacks=callbacks)
@@ -324,8 +334,9 @@ def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
     except IOError:
         roi_nii = load_nii(p[0])
         # Image loading
-        x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
         if mask is None:
+            # This is the unet path
+            x = np.expand_dims(np.stack(load_images(p), axis=0), axis=0)
             # Network parameters
             conv_blocks = options['conv_blocks']
             n_filters = options['n_filters']
@@ -353,29 +364,20 @@ def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
             pr_maps = image_net.predict(x, batch_size=options['test_size'])
             image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
         else:
+            # This is the ensemble path
             image = np.zeros_like(mask, dtype=np.int8)
             options = parse_inputs()
             conv_blocks = options['conv_blocks_seg']
             test_centers = get_mask_blocks(mask)
-            x_d = get_data(
+            x = get_data(
                 image_names=[p],
                 list_of_centers=[test_centers],
                 patch_size=(conv_blocks * 2 + 3,) * 3,
                 verbose=True,
             )
             if verbose:
-                print('%s- Concatenating the data x_d' % ' '.join([''] * 12))
-            x_d = np.concatenate(x_d)
-            x_c = get_data(
-                image_names=[p],
-                list_of_centers=[test_centers],
-                patch_size=(3, 3, 3),
-                verbose=True,
-            )
-            if verbose:
-                print('%s- Concatenating the data x_c' % ' '.join([''] * 12))
-            x_c = np.concatenate(x_c)
-            x = [x_c, x_d]
+                print('%s- Concatenating the data x' % ' '.join([''] * 12))
+            x = np.concatenate(x)
             pr_maps = net.predict(x, batch_size=options['test_size'])
             [x, y, z] = np.stack(test_centers, axis=1)
             image[x, y, z] = np.argmax(pr_maps, axis=1).astype(dtype=np.int8)
@@ -414,8 +416,8 @@ def main():
 
     unet_seg_results = list()
     unet_roi_results = list()
-    cnn_seg_results = list()
-    cnn_roi_results = list()
+    ensemble_seg_results = list()
+    ensemble_roi_results = list()
     image_names, label_names = get_names_from_path(options)
     print('%s[%s] %s<BRATS 2018 pipeline testing>%s' % (c['c'], strftime("%H:%M:%S"), c['y'], c['nc']))
     print('%s[%s] %sCenter computation%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
@@ -432,7 +434,6 @@ def main():
         train_centers = brain_centers[:i] + brain_centers[i + 1:]
         # Patient stuff
         p_name = p[0].rsplit('/')[-2]
-        patient_path = '/'.join(p[0].rsplit('/')[:-1])
 
         # Data stuff
         print('%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
@@ -495,53 +496,77 @@ def main():
             zip(train_images, train_labels)
         )
 
-        # print('%s- Extracting centers from the tumor ROI' % ' '.join([''] * 12))
-        # train_centers = get_mask_centers(masks)
-        # train_centers = map(
-        #     lambda centers:  map(
-        #         tuple,
-        #         np.random.permutation(centers)[::options['down_sampling']].tolist()
-        #     ),
-        #     train_centers
-        # )
+        # > Ensemble training
         #
-        # dense_size = options['dense_size']
-        # conv_blocks_seg = options['conv_blocks_seg']
-        # net = get_brats_cnn(
-        #     n_channels=image_names.shape[-1],
-        #     filters_list=n_filters * conv_blocks_seg,
-        #     kernel_size_list=[conv_width] * conv_blocks_seg,
-        #     nlabels=options['nlabels'],
-        #     dense_size=dense_size
-        # )
-        # train_net(
-        #     image_names=train_images,
-        #     label_names=train_labels,
-        #     train_centers=train_centers,
-        #     net=net,
-        #     p=p,
-        #     sufix='%s.d%d' % (sufix, dense_size),
-        #     nlabels=options['nlabels'],
-        #     seg=True
-        # )
-        # # Testing for the tumor inside the ROI
-        # image_cnn = test_net(
-        #     net,
-        #     p,
-        #     p_name + '.cnn.test' + sufix,
-        #     options['nlabels'],
-        #     mask=image_unet.get_data().astype(np.bool)
-        # )
+        # I should probably try a sliding window and the random sampling version to see which one is better.
+        # Sadly, I have a feeling that the sliding window approach should be worse.
+        print('%s- Extracting centers from the tumor ROI' % ' '.join([''] * 15))
+        train_centers = get_mask_centers(masks)
+        train_centers = map(
+            lambda centers:  map(
+                tuple,
+                np.random.permutation(centers)[::options['down_sampling']].tolist()
+            ),
+            train_centers
+        )
+        print('%s- %d centers will be used' % (' '.join([''] * 15), sum(map(len, train_centers))))
+
+        dense_size = options['dense_size']
+        conv_blocks_seg = options['conv_blocks_seg']
+        nets, ensemble = get_brats_ensemble(
+            n_channels=image_names.shape[-1],
+            filters_list=n_filters * conv_blocks_seg,
+            kernel_size_list=[conv_width] * conv_blocks_seg,
+            nlabels=options['nlabels'],
+            dense_size=dense_size
+        )
+
+        # First we train the nets inside the cluster net (I don't know what other name I could
+        # give to that architecture).
+        train_net(
+            image_names=train_images,
+            label_names=train_labels,
+            train_centers=train_centers,
+            net=nets,
+            p=p,
+            sufix='-nets-%s.d%d' % (sufix, dense_size),
+            nlabels=options['nlabels'],
+            net_type='nets'
+        )
+
+        # Then we train the Dense/Fully Connected layer that defines the ensemble.
+        # The previous networks should be frozen here.
+        train_net(
+            image_names=train_images,
+            label_names=train_labels,
+            train_centers=train_centers,
+            net=nets,
+            p=p,
+            sufix='-ensemble-%s.d%d' % (sufix, dense_size),
+            nlabels=options['nlabels'],
+            net_type='ensemble'
+        )
+
+        # > Testing for the tumor inside the ROI
         #
-        # seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
-        # roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
-        #
-        # dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
-        # print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
-        #       dsc_string % tuple(seg_dsc + roi_dsc))
-        #
-        # cnn_seg_results.append(seg_dsc)
-        # cnn_roi_results.append(roi_dsc)
+        # All we need to do now is test with the ensemble.
+        image_cnn = test_net(
+            ensemble,
+            p,
+            p_name + '.cnn.test' + sufix,
+            options['nlabels'],
+            mask=image_unet.get_data().astype(np.bool)
+        )
+
+        seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
+        roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
+
+        dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
+        print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
+              dsc_string % tuple(seg_dsc + roi_dsc))
+
+        ensemble_seg_results.append(seg_dsc)
+        ensemble_roi_results.append(roi_dsc)
 
     unet_r_dsc = np.mean(unet_roi_results)
     print('Final ROI results DSC: %f' % unet_r_dsc)
