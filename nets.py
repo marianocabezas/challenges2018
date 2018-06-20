@@ -234,49 +234,101 @@ def get_brats_ensemble(n_channels, filters_list, kernel_size_list, nlabels, dens
 
     inputs = Input(shape=input_shape, name='seg_inputs')
 
-    curr_tensor = inputs
-    conv_list = list()
+    cnn_tensor = inputs
+    fcnn_tensor = inputs
+    unet_tensor = inputs
+    ucnn_tensor = inputs
+
+    unet_list = list()
+    ucnn_list = list()
+
     for i, (filters, kernel_size) in enumerate(zip(filters_list, kernel_size_list)):
-        conv = Conv3D(
+        conv_cnn = Conv3D(
             filters,
             kernel_size=kernel_size,
             activation='relu',
             data_format='channels_first'
         )
-        curr_tensor = Dropout(drop)(conv(curr_tensor))
-        conv_list.append(curr_tensor)
+        cnn_tensor = Dropout(drop)(conv_cnn(cnn_tensor))
 
-    # Convolutional only stuff
-    cnn_tensor = Dense(dense_size)(Flatten()(curr_tensor))
+        conv_fcnn = Conv3D(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        fcnn_tensor = Dropout(drop)(conv_fcnn(fcnn_tensor))
+
+        conv_unet = Conv3D(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        unet_tensor = Dropout(drop)(conv_unet(unet_tensor))
+        unet_list.append(unet_tensor)
+
+        conv_ucnn = Conv3D(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        ucnn_tensor = Dropout(drop)(conv_ucnn(ucnn_tensor))
+        ucnn_list.append(ucnn_tensor)
+
+    # > Convolutional only stuff
+    # CNN
+    cnn_tensor = Dense(dense_size)(Flatten()(cnn_tensor))
     cnn_tensor = Dense(nlabels)(cnn_tensor)
-    fcnn_tensor = Conv3D(dense_size, kernel_size=(1, 1, 1), data_format='channels_first')(curr_tensor)
+    # FCNN
+    fcnn_tensor = Conv3D(dense_size, kernel_size=(1, 1, 1), data_format='channels_first')(fcnn_tensor)
     fcnn_tensor = Conv3D(nlabels, kernel_size=(1, 1, 1), data_format='channels_first')(fcnn_tensor)
     fcnn_tensor = Reshape((nlabels, -1))(fcnn_tensor)
     fcnn_tensor = Permute((2, 1))(fcnn_tensor)
 
-    deconv_zip = zip(filters_list[-2::-1], kernel_size_list[-2::-1], conv_list[-2::-1])
-    curr_tensor = Conv3DTranspose(
+    # > U-stuff
+    deconv_zip = zip(filters_list[-2::-1], kernel_size_list[-2::-1], unet_list[-2::-1], ucnn_list[-2::-1])
+    unet_tensor = Conv3DTranspose(
         filters_list[-1],
         kernel_size=kernel_size_list[-1],
         activation='relu',
         data_format='channels_first'
-    )(curr_tensor)
-    for i, (filters, kernel_size, prev_tensor) in enumerate(deconv_zip):
-        concat = concatenate([prev_tensor, curr_tensor], axis=1)
-        deconv = Conv3DTranspose(
+    )(unet_tensor)
+    ucnn_tensor = Conv3DTranspose(
+        filters_list[-1],
+        kernel_size=kernel_size_list[-1],
+        activation='relu',
+        data_format='channels_first'
+    )(ucnn_tensor)
+
+    for i, (filters, kernel_size, prev_unet_tensor, prev_ucnn_tensor) in enumerate(deconv_zip):
+        concat_unet = concatenate([prev_unet_tensor, unet_tensor], axis=1)
+        deconv_unet = Conv3DTranspose(
             filters,
             kernel_size=kernel_size,
             activation='relu',
             data_format='channels_first'
         )
-        curr_tensor = Dropout(drop)(deconv(concat))
+        unet_tensor = Dropout(drop)(deconv_unet(concat_unet))
 
-    dense = Conv3D(nlabels, kernel_size=(1, 1, 1), data_format='channels_first')
-    curr_tensor = dense(curr_tensor)
+        concat_ucnn = concatenate([prev_ucnn_tensor, ucnn_tensor], axis=1)
+        deconv_ucnn = Conv3DTranspose(
+            filters,
+            kernel_size=kernel_size,
+            activation='relu',
+            data_format='channels_first'
+        )
+        ucnn_tensor = Dropout(drop)(deconv_ucnn(concat_ucnn))
 
-    unet_tensor = Reshape((nlabels, -1))(curr_tensor)
+    dense_unet = Conv3D(nlabels, kernel_size=(1, 1, 1), data_format='channels_first')
+    unet_tensor = dense_unet(unet_tensor)
+    unet_tensor = Reshape((nlabels, -1))(unet_tensor)
     unet_tensor = Permute((2, 1))(unet_tensor)
-    ucnn_tensor = Dense(nlabels)(Flatten()(curr_tensor))
+
+    dense_ucnn = Conv3D(nlabels, kernel_size=(1, 1, 1), data_format='channels_first')
+    ucnn_tensor = dense_ucnn(ucnn_tensor)
+    ucnn_tensor = Dense(nlabels)(Flatten()(ucnn_tensor))
 
     unet_out = Activation('softmax', name='unet_seg')(unet_tensor)
     cnn_out = Activation('softmax', name='cnn_seg')(cnn_tensor)
