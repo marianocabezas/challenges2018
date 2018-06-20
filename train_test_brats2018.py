@@ -539,7 +539,7 @@ def main():
             image_names=train_images,
             label_names=train_labels,
             train_centers=train_centers,
-            net=nets,
+            net=ensemble,
             p=p,
             sufix='-ensemble-%s.d%d' % (sufix, dense_size),
             nlabels=options['nlabels'],
