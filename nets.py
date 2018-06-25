@@ -227,7 +227,7 @@ def get_brats_cnn(n_channels, filters_list, kernel_size_list, nlabels, dense_siz
     return net
 
 
-def get_brats_ensemble(n_channels, filters_list, kernel_size_list, nlabels, dense_size, drop=0.2):
+def get_brats_nets(n_channels, filters_list, kernel_size_list, nlabels, dense_size, drop=0.5):
     # Init
     n_blocks = len(filters_list)
     input_shape = (n_channels,) + (n_blocks * 2 + 3,) * 3
@@ -367,14 +367,54 @@ def get_brats_ensemble(n_channels, filters_list, kernel_size_list, nlabels, dens
     nets.compile(
         optimizer='adadelta',
         loss='categorical_crossentropy',
+        metrics=['accuracy'],
+        loss_weights=[2, 2, 2, 2]
+    )
+    return nets, unet, cnn, fcnn, ucnn
+
+
+def get_brats_ensemble(n_channels, n_blocks, unet, cnn, fcnn, ucnn, nlabels):
+    # Init
+    input_shape = (n_channels,) + (n_blocks * 2 + 3,) * 3
+
+    inputs = Input(shape=input_shape, name='seg_inputs')
+
+    # Final ensemble mode. It's basically a weighted average, where the original networks are frozen.
+    for l in unet.layers:
+        l.trainable = False
+    unet.trainable = False
+    unet.compile(
+        optimizer='adadelta',
+        loss='categorical_crossentropy',
         metrics=['accuracy']
     )
 
-    # Final ensemble mode. It's basically a weighted average, where the original networks are frozen.
-    unet.trainable = False
+    for l in cnn.layers:
+        l.trainable = False
     cnn.trainable = False
+    cnn.compile(
+        optimizer='adadelta',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    for l in fcnn.layers:
+        l.trainable = False
     fcnn.trainable = False
+    fcnn.compile(
+        optimizer='adadelta',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    for l in ucnn.layers:
+        l.trainable = False
     ucnn.trainable = False
+    ucnn.compile(
+        optimizer='adadelta',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
 
     ensemble_tensor = concatenate([
         Flatten()(unet(inputs)),
@@ -382,7 +422,6 @@ def get_brats_ensemble(n_channels, filters_list, kernel_size_list, nlabels, dens
         Flatten()(fcnn(inputs)),
         ucnn(inputs)]
     )
-    ensemble_tensor = Dense(dense_size)(ensemble_tensor)
     ensemble_tensor = Dense(nlabels)(ensemble_tensor)
     ensemble_out = Activation('softmax', name='unet_seg')(ensemble_tensor)
 
@@ -393,4 +432,4 @@ def get_brats_ensemble(n_channels, filters_list, kernel_size_list, nlabels, dens
         metrics=['accuracy']
     )
 
-    return nets, ensemble
+    return ensemble

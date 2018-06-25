@@ -5,11 +5,12 @@ from time import strftime
 import numpy as np
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from nibabel import load as load_nii
-from utils import color_codes
+from utils import color_codes, get_biggest_region
 from data_creation import get_mask_centers, get_bounding_centers, get_mask_blocks
 from data_creation import get_patch_labels, get_data, get_labels, load_images
 from data_manipulation.metrics import dsc_seg
-from nets import get_brats_unet, get_brats_invunet, get_brats_ensemble
+from nets import get_brats_unet, get_brats_invunet, get_brats_ensemble, get_brats_nets
+from keras import backend as K
 
 
 def parse_inputs():
@@ -273,12 +274,14 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, n
     try:
         net.load_weights(os.path.join(patient_path, checkpoint))
     except IOError:
+        trainable_params = int(np.sum([K.count_params(p) for p in set(net.trainable_weights)]))
         print(
             '%s[%s] %sTraining the network %s%s %s(%s%d %sparameters)' % (
                 c['c'], strftime("%H:%M:%S"), c['g'], c['b'], net_type, c['nc'],
-                c['b'], net.count_params(), c['nc']
+                c['b'], trainable_params, c['nc']
             )
         )
+
         # net.summary()
         x = get_data(
             image_names=image_names,
@@ -362,6 +365,7 @@ def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
                 ))
             pr_maps = image_net.predict(x, batch_size=options['test_size'])
             image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
+            image = get_biggest_region(image)
         else:
             # This is the ensemble path
             image = np.zeros_like(mask, dtype=np.int8)
@@ -481,19 +485,20 @@ def main():
         print('%s%s<Creating the tumor masks for the training data>%s' % (
                     ''.join([' '] * 14), c['g'], c['nc']
                 ))
-        masks = map(
-            lambda (images, labels): np.logical_or(
-                test_net(
-                    net,
-                    images,
-                    p_name + '.test' + sufix,
-                    options['nlabels'],
-                    verbose=False
-                ).get_data().astype(np.bool),
-                load_nii(labels).get_data().astype(np.bool)
-            ),
-            zip(train_images, train_labels)
-        )
+        # masks = map(
+        #     lambda (images, labels): np.logical_or(
+        #         test_net(
+        #             net,
+        #             images,
+        #             p_name + '.test' + sufix,
+        #             options['nlabels'],
+        #             verbose=False
+        #         ).get_data().astype(np.bool),
+        #         load_nii(labels).get_data().astype(np.bool)
+        #     ),
+        #     zip(train_images, train_labels)
+        # )
+        masks = map(lambda labels: load_nii(labels).get_data().astype(np.bool), train_labels)
 
         # > Ensemble training
         #
@@ -512,7 +517,7 @@ def main():
 
         dense_size = options['dense_size']
         conv_blocks_seg = options['conv_blocks_seg']
-        nets, ensemble = get_brats_ensemble(
+        nets, unet, cnn, fcnn, ucnn  = get_brats_nets(
             n_channels=image_names.shape[-1],
             filters_list=n_filters * conv_blocks_seg,
             kernel_size_list=[conv_width] * conv_blocks_seg,
@@ -535,6 +540,15 @@ def main():
 
         # Then we train the Dense/Fully Connected layer that defines the ensemble.
         # The previous networks should be frozen here.
+        ensemble = get_brats_ensemble(
+            n_channels=image_names.shape[-1],
+            n_blocks=conv_blocks_seg,
+            unet=unet,
+            cnn=cnn,
+            fcnn=fcnn,
+            ucnn=ucnn,
+            nlabels=options['nlabels']
+        )
         train_net(
             image_names=train_images,
             label_names=train_labels,
@@ -576,15 +590,15 @@ def main():
         range(3)
     ))
     print('Final Unet results DSC: (%f/%f/%f)' % unet_f_dsc)
-    # cnn_r_dsc = np.mean(cnn_roi_results)
-    # print('Final ROI results DSC: %f' % cnn_r_dsc)
-    # cnn_f_dsc = tuple(map(
-    #     lambda k: np.mean(
-    #         [dsc[k] for dsc in cnn_seg_results if len(dsc) > k]
-    #     ),
-    #     range(3)
-    # ))
-    # print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
+    cnn_r_dsc = np.mean(ensemble_roi_results)
+    print('Final ROI results DSC: %f' % cnn_r_dsc)
+    cnn_f_dsc = tuple(map(
+        lambda k: np.mean(
+            [dsc[k] for dsc in ensemble_seg_results if len(dsc) > k]
+        ),
+        range(3)
+    ))
+    print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
 
 
 if __name__ == '__main__':
