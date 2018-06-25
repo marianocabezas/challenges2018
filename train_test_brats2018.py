@@ -315,7 +315,12 @@ def train_net(net, image_names, label_names, train_centers, p, sufix, nlabels, n
         x = x[idx]
         y = y[idx] if type(y) is not list else map(lambda yi: yi[idx], y)
 
-        print('%s%sStarting the training process%s' % (' '.join([''] * 12), c['g'], c['nc']))
+        print('%s%sStarting the training process (%s%s%s%s) %s' % (
+            ' '.join([''] * 12),
+            c['g'],
+            c['b'], net_type, c['nc'],
+            c['g'], c['nc'])
+              )
         net.fit(x, y, batch_size=batch_size, validation_split=0.25, epochs=epochs, callbacks=callbacks)
         net.load_weights(os.path.join(patient_path, checkpoint))
 
