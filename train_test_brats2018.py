@@ -368,7 +368,7 @@ def train_survival_function(image_names, survival, features, slices, save_path):
     return net
 
 
-def test_survival(net, image_names, features, slices):
+def test_survival(net, image_names, features, slices, n_slices):
     x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
     print('%s- Concatenating the data' % ' '.join([''] * 12))
     x_vol = np.stack(x_vol, axis=0)
@@ -406,7 +406,7 @@ def test_survival_function(net, save_path, csvwriter, patient=None, verbose=Fals
 
             image_names = np.stack([flair_names, t1_names, t1ce_names])
 
-            survival = test_survival(net, image_names, features, slices)
+            survival = test_survival(net, image_names, features, slices, n_slices)
 
             if verbose:
                 print(
@@ -421,7 +421,7 @@ def test_survival_function(net, save_path, csvwriter, patient=None, verbose=Fals
 
     else:
         (p_name, image_names, features, slices) = patient
-        survival = test_survival(net, image_names, features, slices)
+        survival = test_survival(net, image_names, features, slices, n_slices)
         if verbose:
             print(
                 '%s[%s] %sPatient %s%s%s predicted survival = %s%f%s' % (
@@ -769,11 +769,7 @@ def main():
             #
             # We first test with the ROI segmentation net.
 
-            # TODO: Revert changes
-            # - Original
-            # image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
-            # - Temporary BRATS submission
-            image_unet = test_seg(net, p, p_name, options['nlabels'])
+            image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
 
             seg_dsc = check_dsc(label_names[i], image_unet.get_data(), options['nlabels'])
             roi_dsc = check_dsc(label_names[i], image_unet.get_data().astype(np.bool), 2)
@@ -785,28 +781,26 @@ def main():
             unet_seg_results.append(seg_dsc)
             unet_roi_results.append(roi_dsc)
 
-            # TODO: Revert changes
-            # - Original
-            # # > Testing for the tumor inside the ROI
-            # #
-            # # All we need to do now is test with the ensemble.
-            # image_cnn = test_seg(
-            #     ensemble,
-            #     p,
-            #     p_name,
-            #     options['nlabels'],
-            #     mask=image_unet.get_data().astype(np.bool)
-            # )
+            # > Testing for the tumor inside the ROI
             #
-            # seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
-            # roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
-            #
-            # dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
-            # print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
-            #       dsc_string % tuple(seg_dsc + roi_dsc))
-            #
-            # ensemble_seg_results.append(seg_dsc)
-            # ensemble_roi_results.append(roi_dsc)
+            # All we need to do now is test with the ensemble.
+            image_cnn = test_seg(
+                ensemble,
+                p,
+                p_name,
+                options['nlabels'],
+                mask=image_unet.get_data().astype(np.bool)
+            )
+
+            seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
+            roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
+
+            dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
+            print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
+                  dsc_string % tuple(seg_dsc + roi_dsc))
+
+            ensemble_seg_results.append(seg_dsc)
+            ensemble_roi_results.append(roi_dsc)
 
         unet_r_dsc = np.mean(unet_roi_results)
         print('Final ROI results DSC: %f' % unet_r_dsc)
@@ -818,17 +812,15 @@ def main():
         ))
         print('Final Unet results DSC: (%f/%f/%f)' % unet_f_dsc)
 
-        # TODO: Revert changes
-        # - Original
-        # cnn_r_dsc = np.mean(ensemble_roi_results)
-        # print('Final ROI results DSC: %f' % cnn_r_dsc)
-        # cnn_f_dsc = tuple(map(
-        #     lambda k: np.mean(
-        #         [dsc[k] for dsc in ensemble_seg_results if len(dsc) > k]
-        #     ),
-        #     range(3)
-        # ))
-        # print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
+        cnn_r_dsc = np.mean(ensemble_roi_results)
+        print('Final ROI results DSC: %f' % cnn_r_dsc)
+        cnn_f_dsc = tuple(map(
+            lambda k: np.mean(
+                [dsc[k] for dsc in ensemble_seg_results if len(dsc) > k]
+            ),
+            range(3)
+        ))
+        print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
 
         ''' <Survival task> '''
 
