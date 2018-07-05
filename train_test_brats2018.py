@@ -368,23 +368,21 @@ def train_survival_function(image_names, survival, features, slices, save_path):
     return net
 
 
-def test_survival_function(net, save_path, csvwriter, verbose=False):
+def test_survival_function(net, save_path, csvwriter, patient=None, verbose=False):
     # Init
     options = parse_inputs()
     c = color_codes()
 
     n_slices = options['n_slices']
 
-    # Data preparation
-    survivaldict = get_survival_data(options, test=True)
     ''' Testing '''
-    for k, v in survivaldict.items():
-        flair_names = [os.path.join(save_path, k, k + options['flair'])]
-        t1_names = [os.path.join(save_path, k, k + options['t1'])]
-        t1ce_names = [os.path.join(save_path, k, k + options['t1ce'])]
-        roi = load_nii(os.path.join(save_path, k, k + '.nii.gz')).get_data()
+    def test_patient(id, info):
+        flair_names = [os.path.join(save_path, id, id + options['flair'])]
+        t1_names = [os.path.join(save_path, id, id + options['t1'])]
+        t1ce_names = [os.path.join(save_path, id, id + options['t1ce'])]
+        roi = load_nii(os.path.join(save_path, id, id + '.nii.gz')).get_data()
         center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
-        features = [[v['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
+        features = [[info['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
 
         slices = [[
             slice(0, None),
@@ -399,17 +397,36 @@ def test_survival_function(net, save_path, csvwriter, verbose=False):
         x_vol = np.stack(x_vol, axis=0)
 
         x = [x_vol, np.array(features)]
+        out = net.predict(x)
+        csvwriter.writerow([id, out])
+        return out
+
+    # Fork for the cross-validation and the test branches
+    if patient is None:
+        # Data preparation
+        survivaldict = get_survival_data(options, test=True)
+        for i, (k, v) in enumerate(survivaldict.items()):
+            survival = test_patient(k, v)
+            if verbose:
+                print(
+                    '%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s predicted survival = %s%f%s' % (
+                        c['c'], strftime("%H:%M:%S"),
+                        c['g'], c['b'], k, c['nc'],
+                        c['c'], c['b'], i + 1, c['nc'], c['c'], len(survivaldict), c['nc'],
+                        c['g'], survival, c['nc']
+                    )
+                )
+    else:
+        (k, v) = patient
+        survival = test_patient(k, v)
         if verbose:
-            print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-        survival = net.predict(x)
-        print(
-            '%s%s%s%s Predicted survival %s%d%s' % (
-                ''.join([' '] * 14),
-                c['c'] + c['b'], k, c['nc'],
-                c['g'], survival, c['nc']
+            print(
+                '%s[%s] %sPatient %s%s%s predicted survival = %s%f%s' % (
+                    c['c'], strftime("%H:%M:%S"),
+                    c['g'], c['b'], k, c['nc'],
+                    c['g'], survival, c['nc']
+                )
             )
-        )
-        csvwriter.writerow([k, survival])
 
 
 def train_seg_function(image_names, label_names, brain_centers, save_path):
@@ -465,19 +482,6 @@ def train_seg_function(image_names, label_names, brain_centers, save_path):
     print('%s%s<Creating the tumor masks for the training data>%s' % (
         ''.join([' '] * 14), c['g'], c['nc']
     ))
-    # masks = map(
-    #     lambda (images, labels): np.logical_or(
-    #         test_net(
-    #             net,
-    #             images,
-    #             labels.rsplit('/')[-2] + '.test' + sufix,
-    #             options['nlabels'],
-    #             verbose=False
-    #         ).get_data().astype(np.bool),
-    #         load_nii(labels).get_data().astype(np.bool)
-    #     ),
-    #     zip(image_names, label_names)
-    # )
     masks = map(lambda labels: load_nii(labels).get_data().astype(np.bool), label_names)
 
     # > Ensemble training
@@ -732,8 +736,11 @@ def main():
     test_dir = options['train_dir'][1]
 
     if test_dir is None:
-        print('%s[%s] %sStarting leave-one-out%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+        ''' <Segmentation task> '''
+
+        print('%s[%s] %sStarting leave-one-out (segmentation)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
         for i in range(len(image_names)):
+            ''' Training '''
             # Data separation
             p = image_names[i]
             train_images = np.asarray(image_names.tolist()[:i] + image_names.tolist()[i + 1:])
@@ -750,12 +757,13 @@ def main():
                 c['c'], c['b'], i+1, c['nc'], c['c'], len(brain_centers), c['nc']
             ))
 
+            # > Training for everything
+            net, ensemble = train_seg_function(train_images, train_labels, train_centers, save_path=patient_path)
+
+            ''' Testing '''
             # > Testing for the tumor ROI
             #
             # We first test with the ROI segmentation net.
-            net, ensemble = train_seg_function(train_images, train_labels, train_centers, save_path=patient_path)
-
-            # Testing for the ROI
             image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
 
             seg_dsc = check_dsc(label_names[i], image_unet.get_data(), options['nlabels'])
@@ -807,10 +815,52 @@ def main():
             range(3)
         ))
         print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
+
+        ''' <Survival task> '''
+
+        ''' Training '''
+        simage_names, survival, features, slices = get_survival_data(options)
+        print('%s[%s] %sStarting leave-one-out (survival)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+        with open(os.path.join(test_dir, 'survival_results.csv'), 'w') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            for i in range(len(simage_names)):
+                # Data separation
+                p = simage_names[i]
+                train_images = np.asarray(simage_names.tolist()[:i] + simage_names.tolist()[i + 1:])
+                train_survival = np.asarray(survival.tolist()[:i] + survival.tolist()[i + 1:])
+                train_features = np.asarray(features.tolist()[:i] + features.tolist()[i + 1:])
+                train_slices = slices[:i] + slices[i + 1:]
+
+                # Patient info
+                p_name = p[0].rsplit('/')[-2]
+                patient_path = '/'.join(p[0].rsplit('/')[:-1])
+
+                print(
+                    '%s[%s] %sStarting training (%ssurvival%s)%s' % (
+                        c['c'], strftime("%H:%M:%S"),
+                        c['g'], c['b'], c['nc'] + c['g'], c['nc']
+                    )
+                )
+
+                snet = train_survival_function(
+                    train_images,
+                    train_survival,
+                    train_features,
+                    train_slices,
+                    save_path=patient_path
+                )
+                test_survival_function(snet, save_path=test_dir, csvwriter=csvwriter, verbose=True)
+
     else:
-        print('%s[%s] %sStarting training (%ssegmentation%s)%s' % (
-            c['c'], strftime("%H:%M:%S"),
-            c['g'], c['b'], c['nc'] + c['g'], c['nc']))
+        ''' <Segmentation task> '''
+
+        ''' Training'''
+        print(
+            '%s[%s] %sStarting training (%ssegmentation%s)%s' % (
+                c['c'], strftime("%H:%M:%S"),
+                c['g'], c['b'], c['nc'] + c['g'], c['nc']
+            )
+        )
 
         net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=test_dir)
 
@@ -843,14 +893,19 @@ def main():
                 mask=image_unet.get_data().astype(np.bool)
             )
 
-        ''' Survival training'''
-        print('%s[%s] %sStarting training (%ssurvival%s)%s' % (
-            c['c'], strftime("%H:%M:%S"),
-            c['g'], c['b'], c['nc'] + c['g'], c['nc']))
+        ''' <Survival task> '''
+
+        ''' Training'''
+        print(
+            '%s[%s] %sStarting training (%ssurvival%s)%s' % (
+                c['c'], strftime("%H:%M:%S"),
+                c['g'], c['b'], c['nc'] + c['g'], c['nc']
+            )
+        )
         simage_names, survival, features, slices = get_survival_data(options)
         snet = train_survival_function(image_names, survival, features, slices, save_path=test_dir)
 
-        ''' Survival testing '''
+        ''' Testing '''
         with open(os.path.join(test_dir, 'survival_results.csv'), 'w') as csvfile:
             csvwriter = csv.writer(csvfile, delimiter=',')
             test_survival_function(snet, save_path=test_dir, csvwriter=csvwriter, verbose=True)
