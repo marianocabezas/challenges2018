@@ -1,15 +1,16 @@
 from __future__ import print_function
 import argparse
 import os
+import csv
 from time import strftime
 import numpy as np
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from nibabel import load as load_nii
 from utils import color_codes, get_biggest_region
 from data_creation import get_mask_centers, get_bounding_centers, get_mask_blocks
-from data_creation import get_patch_labels, get_data, get_labels, load_images
+from data_creation import get_patch_labels, get_data, get_labels, load_images, get_reshaped_data
 from data_manipulation.metrics import dsc_seg
-from nets import get_brats_unet, get_brats_invunet, get_brats_ensemble, get_brats_nets
+from nets import get_brats_unet, get_brats_invunet, get_brats_ensemble, get_brats_nets, get_brats_survival
 from keras import backend as K
 
 
@@ -21,14 +22,8 @@ def parse_inputs():
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         '-t', '--train',
-        dest='train_dir', default=None,
+        dest='train_dir', default=None, nargs=2,
         help='Option to train a network. The second parameter is the folder with all the patients.'
-    )
-    group.add_argument(
-        '-T', '--test',
-        dest='test_dir', default=None,
-        help='Option to test a network trained with the dataset in train_dir. The second parameter'
-             'is the folder with all the patients.'
     )
     group.add_argument(
         '-l', '--leave-one-out',
@@ -162,6 +157,11 @@ def parse_inputs():
         action='store', dest='netname', default='unet',
         help='Typor of network architecture'
     )
+    parser.add_argument(
+        '-S', '--number-slices',
+        dest='n_slices', type=int, default=40,
+        help='Initial patch size'
+    )
 
     networks = {
         'unet': get_brats_unet,
@@ -177,16 +177,67 @@ def parse_inputs():
     return options
 
 
+def get_survival_data(options, test=False):
+    # Init
+    if options['train_dir'] is not None:
+        path = options['train_dir'][0] if not test else options['train_dir'][1]
+    else:
+        path = options['loo_dir']
+
+    n_slices = options['n_slices']
+
+    with open(os.path.join(path, 'survival_data.csv')) as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',')
+        names = csvreader.next()
+        survivaldict = {
+            p[0]: {
+                field: value
+                for field, value in zip(names[1:], p[1:])
+            }
+            for p in csvreader
+        }
+
+    if not test:
+        flair_names = list()
+        t1_names = list()
+        t1ce_names = list()
+        survival = list()
+        features = list()
+        slices = list()
+        for k, v in survivaldict.items():
+            flair_names += [os.path.join(path, k, k + options['flair'])]
+            t1_names += [os.path.join(path, k, k + options['t1'])]
+            t1ce_names += [os.path.join(path, k, k + options['t1ce'])]
+            roi_sufix = '_seg.nii.gz' if not test else '.nii.gz'
+            roi = load_nii(os.path.join(path, k, k + roi_sufix)).get_data()
+            center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
+            features += [[v['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
+            survival += [v['Survival']]
+            slices += [[
+                slice(0, None),
+                slice(0, None),
+                slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
+            ]]
+
+        image_names = np.stack([flair_names, t1_names, t1ce_names])
+        packed_return = (image_names, np.array(survival), np.array(features), slices)
+
+    else:
+        packed_return = survivaldict
+
+    return packed_return
+
+
 def get_names_from_path(options, path=None):
     if path is None:
-        path = options['dir_train'] if options['train_dir'] is not None else options['loo_dir']
+        path = options['train_dir'][0] if options['train_dir'] is not None else options['loo_dir']
 
     directories = filter(os.path.isdir, [os.path.join(path, f) for f in os.listdir(path)])
     patients = sorted(directories)
 
     # Prepare the names
     def get_names(sufix):
-        return map(lambda p: os.path.join(path, p, p.split('/')[-1] + sufix), patients)
+        return map(lambda p: os.path.join(p, p.split('/')[-1] + sufix), patients)
     flair_names = get_names(options['flair']) if options['use_flair'] else None
     # flair_names = [os.path.join(path, p, p.split('/')[-1] + options['flair']) for p in patients]
     t2_names = get_names(options['t2']) if options['use_t2'] else None
@@ -250,7 +301,118 @@ def get_cluster_labels(centers, names, nlabels):
     return y
 
 
-def train_function(image_names, label_names, brain_centers, save_path):
+def train_survival_function(image_names, survival, features, slices, save_path):
+    # Init
+    options = parse_inputs()
+    c = color_codes()
+    # Prepare the net hyperparameters
+    epochs = options['epochs']
+    n_slices = options['n_slices']
+
+    ''' Net preparation '''
+    net = get_brats_survival(n_slices=n_slices)
+    net_name = os.path.join(save_path, 'brats2018-survival.mdl')
+    net.save(net_name)
+    checkpoint = 'brats2018-survival.hdf5'
+    callbacks = [
+        EarlyStopping(
+            monitor='val_loss',
+            patience=options['patience']
+        ),
+        ModelCheckpoint(
+            os.path.join(save_path, checkpoint),
+            monitor='val_loss',
+            save_best_only=True
+        )
+    ]
+    # net.summary()
+
+    ''' Training '''
+    try:
+        net.load_weights(os.path.join(save_path, checkpoint))
+        print(
+            '%s[%s] %sSurvival network weights %sloaded%s' % (
+                c['c'], strftime("%H:%M:%S"), c['g'],
+                c['b'], c['nc']
+            )
+        )
+    except IOError:
+        trainable_params = int(np.sum([K.count_params(w) for w in set(net.trainable_weights)]))
+        print(
+            '%s[%s] %sTraining the survival network %s(%s%d %sparameters)' % (
+                c['c'], strftime("%H:%M:%S"), c['g'], c['nc'],
+                c['b'], trainable_params, c['nc']
+            )
+        )
+
+        # Data preparation
+        x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
+        print('%s- Concatenating the data' % ' '.join([''] * 12))
+        x_vol = np.stack(x_vol, axis=0)
+
+        print('%s-- X (volume) shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x_vol.shape))))
+        print('%s-- X (features) shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, features.shape))))
+        print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, survival.shape))))
+
+        print('%s- Randomising the training data' % ' '.join([''] * 12))
+        idx = np.random.permutation(range(len(features)))
+
+        x_vol = x_vol[idx]
+        x_feat = features[idx]
+        x = [x_vol, x_feat]
+        y = survival[idx]
+
+        net.fit(x, y, batch_size=4, validation_split=0.25, epochs=epochs, callbacks=callbacks)
+        net.load_weights(os.path.join(save_path, checkpoint))
+
+    return net
+
+
+def test_survival_function(net, save_path, csvwriter, verbose=False):
+    # Init
+    options = parse_inputs()
+    c = color_codes()
+
+    n_slices = options['n_slices']
+
+    # Data preparation
+    survivaldict = get_survival_data(options, test=True)
+    ''' Testing '''
+    for k, v in survivaldict.items():
+        flair_names = [os.path.join(save_path, k, k + options['flair'])]
+        t1_names = [os.path.join(save_path, k, k + options['t1'])]
+        t1ce_names = [os.path.join(save_path, k, k + options['t1ce'])]
+        roi = load_nii(os.path.join(save_path, k, k + '.nii.gz')).get_data()
+        center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
+        features = [[v['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
+
+        slices = [[
+            slice(0, None),
+            slice(0, None),
+            slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
+        ]]
+
+        image_names = np.stack([flair_names, t1_names, t1ce_names])
+
+        x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
+        print('%s- Concatenating the data' % ' '.join([''] * 12))
+        x_vol = np.stack(x_vol, axis=0)
+
+        x = [x_vol, np.array(features)]
+        if verbose:
+            print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+        survival = net.predict(x)
+        print(
+            '%s%s%s%s Predicted survival %s%d%s' % (
+                ''.join([' '] * 14),
+                c['c'] + c['b'], k, c['nc'],
+                c['g'], survival, c['nc']
+            )
+        )
+        csvwriter.writerow([k, survival])
+
+
+def train_seg_function(image_names, label_names, brain_centers, save_path):
     # Init
     options = parse_inputs()
     c = color_codes()
@@ -264,7 +426,6 @@ def train_function(image_names, label_names, brain_centers, save_path):
     filters_list = n_filters if len(n_filters) > 1 else n_filters * conv_blocks
     conv_width = options['conv_width']
     kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
-    # Data loading parameters
 
     # Prepare the sufix that will be added to the results for the net and images
     filters_s = 'n'.join(['%d' % nf for nf in filters_list])
@@ -286,7 +447,7 @@ def train_function(image_names, label_names, brain_centers, save_path):
         kernel_size_list=kernel_size_list,
         nlabels=options['nlabels']
     )
-    train_net(
+    train_seg(
         image_names=image_names,
         label_names=label_names,
         train_centers=brain_centers,
@@ -346,7 +507,7 @@ def train_function(image_names, label_names, brain_centers, save_path):
 
     # First we train the nets inside the cluster net (I don't know what other name I could
     # give to that architecture).
-    train_net(
+    train_seg(
         image_names=image_names,
         label_names=label_names,
         train_centers=train_centers,
@@ -368,7 +529,7 @@ def train_function(image_names, label_names, brain_centers, save_path):
         ucnn=ucnn,
         nlabels=options['nlabels']
     )
-    train_net(
+    train_seg(
         image_names=image_names,
         label_names=label_names,
         train_centers=train_centers,
@@ -382,7 +543,7 @@ def train_function(image_names, label_names, brain_centers, save_path):
     return net, ensemble
 
 
-def train_net(net, image_names, label_names, train_centers, save_path, sufix, nlabels, net_type='unet'):
+def train_seg(net, image_names, label_names, train_centers, save_path, sufix, nlabels, net_type='unet'):
     options = parse_inputs()
     conv_blocks = options['conv_blocks_seg']
     patch_width = options['patch_width']
@@ -462,7 +623,7 @@ def train_net(net, image_names, label_names, train_centers, save_path, sufix, nl
         net.load_weights(os.path.join(save_path, checkpoint))
 
 
-def test_net(net, p, outputname, nlabels, mask=None, verbose=True):
+def test_seg(net, p, outputname, nlabels, mask=None, verbose=True):
 
     c = color_codes()
     options = parse_inputs()
@@ -568,7 +729,7 @@ def main():
     # Block center computation
     overlap = 0 if options['netname'] != 'roinet' else patch_width / 4
     brain_centers = get_bounding_centers(image_names, patch_width, overlap)
-    test_dir = options['test_dir']
+    test_dir = options['train_dir'][1]
 
     if test_dir is None:
         print('%s[%s] %sStarting leave-one-out%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
@@ -592,10 +753,10 @@ def main():
             # > Testing for the tumor ROI
             #
             # We first test with the ROI segmentation net.
-            net, ensemble = train_function(train_images, train_labels, train_centers, save_path=patient_path)
+            net, ensemble = train_seg_function(train_images, train_labels, train_centers, save_path=patient_path)
 
             # Testing for the ROI
-            image_unet = test_net(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
+            image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
 
             seg_dsc = check_dsc(label_names[i], image_unet.get_data(), options['nlabels'])
             roi_dsc = check_dsc(label_names[i], image_unet.get_data().astype(np.bool), 2)
@@ -610,10 +771,10 @@ def main():
             # > Testing for the tumor inside the ROI
             #
             # All we need to do now is test with the ensemble.
-            image_cnn = test_net(
+            image_cnn = test_seg(
                 ensemble,
                 p,
-                p_name + '.cnn.test' + sufix,
+                p_name,
                 options['nlabels'],
                 mask=image_unet.get_data().astype(np.bool)
             )
@@ -647,16 +808,18 @@ def main():
         ))
         print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
     else:
-        print('%s[%s] %sStarting training%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+        print('%s[%s] %sStarting training (%ssegmentation%s)%s' % (
+            c['c'], strftime("%H:%M:%S"),
+            c['g'], c['b'], c['nc'] + c['g'], c['nc']))
 
-        net, ensemble = train_function(image_names, label_names, brain_centers, save_path=test_dir)
+        net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=test_dir)
 
         ''' Testing '''
-        print('%s[%s] %sStarting testing%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+        print('%s[%s] %sStarting testing (segmentation)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
         test_image_names, _ = get_names_from_path(options, path=test_dir)
         for i in range(len(test_image_names)):
             # Patient stuff
-            p = image_names[i]
+            p = test_image_names[i]
             p_name = p[0].rsplit('/')[-2]
             print('%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
                 c['c'], strftime("%H:%M:%S"),
@@ -667,18 +830,30 @@ def main():
             # > Testing for the tumor ROI
             #
             # We first test with the ROI segmentation net.
-            image_unet = test_net(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
+            image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
 
             # > Testing for the tumor inside the ROI
             #
             # All we need to do now is test with the ensemble.
-            test_net(
+            test_seg(
                 ensemble,
                 p,
-                p_name + '.cnn.test' + sufix,
+                p_name,
                 options['nlabels'],
                 mask=image_unet.get_data().astype(np.bool)
             )
+
+        ''' Survival training'''
+        print('%s[%s] %sStarting training (%ssurvival%s)%s' % (
+            c['c'], strftime("%H:%M:%S"),
+            c['g'], c['b'], c['nc'] + c['g'], c['nc']))
+        simage_names, survival, features, slices = get_survival_data(options)
+        snet = train_survival_function(image_names, survival, features, slices, save_path=test_dir)
+
+        ''' Survival testing '''
+        with open(os.path.join(test_dir, 'survival_results.csv'), 'w') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            test_survival_function(snet, save_path=test_dir, csvwriter=csvwriter, verbose=True)
 
 
 if __name__ == '__main__':

@@ -5,6 +5,7 @@ from scipy.ndimage.morphology import binary_dilation as imdilate
 from itertools import chain, product, izip
 from keras.utils import to_categorical
 from data_manipulation.generate_features import get_patches, get_mask_voxels
+from skimage.transform import resize
 
 
 """
@@ -102,6 +103,43 @@ def get_data(
         print('%s- Loading x' % ' '.join([''] * 12))
     x = filter(lambda z: z.any(), get_patches_list(image_names, list_of_centers, patch_size))
     x = map(lambda x_i: x_i.astype(dtype=datatype), x)
+    return x
+
+
+def get_reshaped_data(
+        image_names,
+        slices,
+        slice_shape,
+        n_slices=20,
+        datatype=np.float32,
+        verbose=False
+):
+    if verbose:
+        print('%s- Loading x' % ' '.join([''] * 12))
+
+    def load_normalised_patch(name, slice):
+        image = load_nii(name).get_data()[slice].astype(np.float32)
+        value_range_half = image.max() - image.min()
+        image -= value_range_half
+        image /= value_range_half
+        return image
+
+    x = map(
+        lambda (p, s): np.moveaxis(
+            resize(
+                np.stack(
+                    map(lambda im: load_normalised_patch(im, s), p),
+                    axis=0,
+                ).astype(dtype=datatype),
+                (3,) + slice_shape + (n_slices,),
+                mode='constant',
+                anti_aliasing=True
+            ),
+            0, -1
+        ),
+        zip(image_names, slices)
+    )
+
     return x
 
 

@@ -1,7 +1,8 @@
 from keras import backend as K
 from keras.layers import Conv3D, Dropout, Input, Conv3DTranspose, Flatten, Dense, concatenate
-from keras.layers import Activation, Reshape, Permute, Lambda
+from keras.layers import Activation, Reshape, Permute, Lambda, Average
 from keras.models import Model
+from keras.applications.vgg16 import VGG16
 
 
 def dsc_loss(y_true, y_pred):
@@ -433,3 +434,33 @@ def get_brats_ensemble(n_channels, n_blocks, unet, cnn, fcnn, ucnn, nlabels):
     )
 
     return ensemble
+
+
+def get_brats_survival(n_slices=20, n_features=4):
+    # Input (3D volume of X*X*S) + other features (age, tumor volumes and resection status?)
+    # This volume should be split into S inputs that will be passed to S VGG models.
+    vol_input = Input(shape=(224, 224, n_slices, 3), name='vol_input')
+    slice_inputs = map(lambda i: Lambda(lambda l: l[:, :, :, i, :])(vol_input), range(n_slices))
+
+    feature_input = Input(shape=(n_features,), name='feat_input')
+    inputs = [vol_input, feature_input]
+
+    # VGG init
+    base_model = VGG16(weights='imagenet')
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    vgg_out = Average()(map(base_model, slice_inputs))
+
+    # Here we add the final layers to compute the survival value
+    final_tensor = concatenate([feature_input, vgg_out])
+    output = Dense(1, kernel_initializer='normal')(final_tensor)
+
+    survival_net = Model(inputs=inputs, outputs=output)
+    survival_net.compile(
+        optimizer='rmsprop',
+        loss='mean_squared_error',
+        metrics=['accuracy']
+    )
+
+    return survival_net
