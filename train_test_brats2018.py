@@ -368,6 +368,16 @@ def train_survival_function(image_names, survival, features, slices, save_path):
     return net
 
 
+def test_survival(net, image_names, features, slices):
+    x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
+    print('%s- Concatenating the data' % ' '.join([''] * 12))
+    x_vol = np.stack(x_vol, axis=0)
+
+    x = [x_vol, np.array(features)]
+    survival = net.predict(x)
+    return survival
+
+
 def test_survival_function(net, save_path, csvwriter, patient=None, verbose=False):
     # Init
     options = parse_inputs()
@@ -376,57 +386,51 @@ def test_survival_function(net, save_path, csvwriter, patient=None, verbose=Fals
     n_slices = options['n_slices']
 
     ''' Testing '''
-    def test_patient(id, info):
-        flair_names = [os.path.join(save_path, id, id + options['flair'])]
-        t1_names = [os.path.join(save_path, id, id + options['t1'])]
-        t1ce_names = [os.path.join(save_path, id, id + options['t1ce'])]
-        roi = load_nii(os.path.join(save_path, id, id + '.nii.gz')).get_data()
-        center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
-        features = [[info['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
-
-        slices = [[
-            slice(0, None),
-            slice(0, None),
-            slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
-        ]]
-
-        image_names = np.stack([flair_names, t1_names, t1ce_names])
-
-        x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
-        print('%s- Concatenating the data' % ' '.join([''] * 12))
-        x_vol = np.stack(x_vol, axis=0)
-
-        x = [x_vol, np.array(features)]
-        out = net.predict(x)
-        csvwriter.writerow([id, str(out)])
-        return out
-
     # Fork for the cross-validation and the test branches
     if patient is None:
         # Data preparation
         survivaldict = get_survival_data(options, test=True)
-        for i, (k, v) in enumerate(survivaldict.items()):
-            survival = test_patient(k, v)
+        for i, (p_name, v) in enumerate(survivaldict.items()):
+            flair_names = [os.path.join(save_path, p_name, p_name + options['flair'])]
+            t1_names = [os.path.join(save_path, p_name, p_name + options['t1'])]
+            t1ce_names = [os.path.join(save_path, p_name, p_name + options['t1ce'])]
+            roi = load_nii(os.path.join(save_path, p_name, p_name + '.nii.gz')).get_data()
+            center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
+            features = [[v['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
+
+            slices = [[
+                slice(0, None),
+                slice(0, None),
+                slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
+            ]]
+
+            image_names = np.stack([flair_names, t1_names, t1ce_names])
+
+            survival = test_survival(net, image_names, features, slices)
+
             if verbose:
                 print(
                     '%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s predicted survival = %s%f%s' % (
                         c['c'], strftime("%H:%M:%S"),
-                        c['g'], c['b'], k, c['nc'],
+                        c['g'], c['b'], p_name, c['nc'],
                         c['c'], c['b'], i + 1, c['nc'], c['c'], len(survivaldict), c['nc'],
                         c['g'], survival, c['nc']
                     )
                 )
+            csvwriter.writerow([id, str(survival)])
+
     else:
-        (k, v) = patient
-        survival = test_patient(k, v)
+        (p_name, image_names, features, slices) = patient
+        survival = test_survival(net, image_names, features, slices)
         if verbose:
             print(
                 '%s[%s] %sPatient %s%s%s predicted survival = %s%f%s' % (
                     c['c'], strftime("%H:%M:%S"),
-                    c['g'], c['b'], k, c['nc'],
+                    c['g'], c['b'], p_name, c['nc'],
                     c['g'], survival, c['nc']
                 )
             )
+        csvwriter.writerow([p_name, str(survival)])
 
 
 def train_seg_function(image_names, label_names, brain_centers, save_path):
@@ -764,7 +768,12 @@ def main():
             # > Testing for the tumor ROI
             #
             # We first test with the ROI segmentation net.
-            image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
+
+            # TODO: Revert changes
+            # - Original
+            # image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
+            # - Temporary BRATS submission
+            image_unet = test_seg(net, p, p_name, options['nlabels'])
 
             seg_dsc = check_dsc(label_names[i], image_unet.get_data(), options['nlabels'])
             roi_dsc = check_dsc(label_names[i], image_unet.get_data().astype(np.bool), 2)
@@ -776,26 +785,28 @@ def main():
             unet_seg_results.append(seg_dsc)
             unet_roi_results.append(roi_dsc)
 
-            # > Testing for the tumor inside the ROI
+            # TODO: Revert changes
+            # - Original
+            # # > Testing for the tumor inside the ROI
+            # #
+            # # All we need to do now is test with the ensemble.
+            # image_cnn = test_seg(
+            #     ensemble,
+            #     p,
+            #     p_name,
+            #     options['nlabels'],
+            #     mask=image_unet.get_data().astype(np.bool)
+            # )
             #
-            # All we need to do now is test with the ensemble.
-            image_cnn = test_seg(
-                ensemble,
-                p,
-                p_name,
-                options['nlabels'],
-                mask=image_unet.get_data().astype(np.bool)
-            )
-
-            seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
-            roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
-
-            dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
-            print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
-                  dsc_string % tuple(seg_dsc + roi_dsc))
-
-            ensemble_seg_results.append(seg_dsc)
-            ensemble_roi_results.append(roi_dsc)
+            # seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
+            # roi_dsc = check_dsc(label_names[i], image_cnn.get_data().astype(np.bool), 2)
+            #
+            # dsc_string = c['g'] + '/'.join(['%f'] * len(seg_dsc)) + c['nc'] + ' (%f)'
+            # print(''.join([' '] * 14) + c['c'] + c['b'] + p_name + c['nc'] + ' CNN DSC: ' +
+            #       dsc_string % tuple(seg_dsc + roi_dsc))
+            #
+            # ensemble_seg_results.append(seg_dsc)
+            # ensemble_roi_results.append(roi_dsc)
 
         unet_r_dsc = np.mean(unet_roi_results)
         print('Final ROI results DSC: %f' % unet_r_dsc)
@@ -806,15 +817,18 @@ def main():
             range(3)
         ))
         print('Final Unet results DSC: (%f/%f/%f)' % unet_f_dsc)
-        cnn_r_dsc = np.mean(ensemble_roi_results)
-        print('Final ROI results DSC: %f' % cnn_r_dsc)
-        cnn_f_dsc = tuple(map(
-            lambda k: np.mean(
-                [dsc[k] for dsc in ensemble_seg_results if len(dsc) > k]
-            ),
-            range(3)
-        ))
-        print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
+
+        # TODO: Revert changes
+        # - Original
+        # cnn_r_dsc = np.mean(ensemble_roi_results)
+        # print('Final ROI results DSC: %f' % cnn_r_dsc)
+        # cnn_f_dsc = tuple(map(
+        #     lambda k: np.mean(
+        #         [dsc[k] for dsc in ensemble_seg_results if len(dsc) > k]
+        #     ),
+        #     range(3)
+        # ))
+        # print('Final CNN results DSC: (%f/%f/%f)' % cnn_f_dsc)
 
         ''' <Survival task> '''
 
@@ -849,7 +863,14 @@ def main():
                     train_slices,
                     save_path=patient_path
                 )
-                test_survival_function(snet, save_path=test_dir, csvwriter=csvwriter, verbose=True)
+
+                test_survival_function(
+                    snet,
+                    patient=(p_name, p, features[i], slices[i]),
+                    save_path=test_dir,
+                    csvwriter=csvwriter,
+                    verbose=True
+                )
 
     else:
         ''' <Segmentation task> '''
