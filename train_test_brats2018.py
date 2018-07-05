@@ -398,7 +398,7 @@ def test_survival_function(net, save_path, csvwriter, patient=None, verbose=Fals
 
         x = [x_vol, np.array(features)]
         out = net.predict(x)
-        csvwriter.writerow([id, out])
+        csvwriter.writerow([id, str(out)])
         return out
 
     # Fork for the cross-validation and the test branches
