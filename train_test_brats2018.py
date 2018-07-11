@@ -80,7 +80,12 @@ def parse_inputs():
     parser.add_argument(
         '-e', '--epochs',
         action='store', dest='epochs', type=int, default=10,
-        help='Number of maximum epochs for training'
+        help='Number of maximum epochs for training the segmentation task'
+    )
+    parser.add_argument(
+        '-E', '--survival-epochs',
+        action='store', dest='sepochs', type=int, default=25,
+        help='Number of maximum epochs for training the survival task'
     )
     parser.add_argument(
         '-v', '--validation-rate',
@@ -162,6 +167,11 @@ def parse_inputs():
         dest='n_slices', type=int, default=40,
         help='Initial patch size'
     )
+    parser.add_argument(
+        '-f', '--number-folds',
+        dest='n_folds', type=int, default=5,
+        help='Number of folds for the cross-validation'
+    )
 
     networks = {
         'unet': get_brats_unet,
@@ -211,7 +221,8 @@ def get_survival_data(options, test=False):
             roi_sufix = '_seg.nii.gz' if not test else '.nii.gz'
             roi = load_nii(os.path.join(path, k, k + roi_sufix)).get_data()
             center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
-            features += [[v['Age']] + map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])]
+            vol_features = map(lambda l: np.count_nonzero(roi == l) / np.count_nonzero(roi), [1, 2, 4])
+            features += [[float(v['Age']) / 100] + vol_features]
             survival += [v['Survival']]
             slices += [[
                 slice(0, None),
@@ -219,7 +230,7 @@ def get_survival_data(options, test=False):
                 slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
             ]]
 
-        image_names = np.stack([flair_names, t1_names, t1ce_names])
+        image_names = np.stack([flair_names, t1_names, t1ce_names], axis=1)
         packed_return = (image_names, np.array(survival), np.array(features), slices)
 
     else:
@@ -228,27 +239,26 @@ def get_survival_data(options, test=False):
     return packed_return
 
 
-def get_names_from_path(options, path=None):
+def get_names(sufix, path):
+    options = parse_inputs()
     if path is None:
         path = options['train_dir'][0] if options['train_dir'] is not None else options['loo_dir']
 
     directories = filter(os.path.isdir, [os.path.join(path, f) for f in os.listdir(path)])
     patients = sorted(directories)
 
-    # Prepare the names
-    def get_names(sufix):
-        return map(lambda p: os.path.join(p, p.split('/')[-1] + sufix), patients)
-    flair_names = get_names(options['flair']) if options['use_flair'] else None
-    # flair_names = [os.path.join(path, p, p.split('/')[-1] + options['flair']) for p in patients]
-    t2_names = get_names(options['t2']) if options['use_t2'] else None
-    # t2_names = [os.path.join(path, p, p.split('/')[-1] + options['t2']) for p in patients]
-    t1_names = get_names(options['t1']) if options['use_t1'] else None
-    # t1_names = [os.path.join(path, p, p.split('/')[-1] + options['t1']) for p in patients]
-    t1ce_names = get_names(options['t1ce']) if options['use_t1ce'] else None
-    # t1ce_names = [os.path.join(path, p, p.split('/')[-1] + options['t1ce']) for p in patients]
+    return map(lambda p: os.path.join(p, p.split('/')[-1] + sufix), patients)
 
-    # label_names = np.array([os.path.join(path, p, p.split('/')[-1] + options['labels']) for p in patients])
-    label_names = np.array(get_names(options['labels']))
+
+def get_names_from_path(path=None):
+    options = parse_inputs()
+    # Prepare the names
+    flair_names = get_names(options['flair'], path) if options['use_flair'] else None
+    t2_names = get_names(options['t2'], path) if options['use_t2'] else None
+    t1_names = get_names(options['t1'], path) if options['use_t1'] else None
+    t1ce_names = get_names(options['t1ce'], path) if options['use_t1ce'] else None
+
+    label_names = np.array(get_names(options['labels'], path))
     image_names = np.stack(filter(None, [flair_names, t2_names, t1_names, t1ce_names]), axis=1)
 
     return image_names, label_names
@@ -301,19 +311,19 @@ def get_cluster_labels(centers, names, nlabels):
     return y
 
 
-def train_survival_function(image_names, survival, features, slices, save_path):
+def train_survival_function(image_names, survival, features, slices, save_path, sufix=''):
     # Init
     options = parse_inputs()
     c = color_codes()
     # Prepare the net hyperparameters
-    epochs = options['epochs']
+    epochs = options['sepochs']
     n_slices = options['n_slices']
 
     ''' Net preparation '''
     net = get_brats_survival(n_slices=n_slices)
-    net_name = os.path.join(save_path, 'brats2018-survival.mdl')
+    net_name = os.path.join(save_path, 'brats2018-survival%s.mdl' % sufix)
     net.save(net_name)
-    checkpoint = 'brats2018-survival.hdf5'
+    checkpoint = 'brats2018-survival%s.hdf5' % sufix
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
@@ -362,15 +372,14 @@ def train_survival_function(image_names, survival, features, slices, save_path):
         x = [x_vol, x_feat]
         y = survival[idx]
 
-        net.fit(x, y, batch_size=4, validation_split=0.25, epochs=epochs, callbacks=callbacks)
+        net.fit(x, y, batch_size=8, validation_split=0.25, epochs=epochs, callbacks=callbacks)
         net.load_weights(os.path.join(save_path, checkpoint))
 
     return net
 
 
 def test_survival(net, image_names, features, slices, n_slices):
-    x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
-    print('%s- Concatenating the data' % ' '.join([''] * 12))
+    x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices)
     x_vol = np.stack(x_vol, axis=0)
 
     x = [x_vol, np.array(features)]
@@ -404,7 +413,7 @@ def test_survival_function(net, save_path, csvwriter, patient=None, verbose=Fals
                 slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
             ]]
 
-            image_names = np.stack([flair_names, t1_names, t1ce_names])
+            image_names = np.stack([flair_names, t1_names, t1ce_names], axis=1)
 
             survival = test_survival(net, image_names, features, slices, n_slices)
 
@@ -420,17 +429,17 @@ def test_survival_function(net, save_path, csvwriter, patient=None, verbose=Fals
             csvwriter.writerow([id, str(survival)])
 
     else:
-        (p_name, image_names, features, slices) = patient
-        survival = test_survival(net, image_names, features, slices, n_slices)
-        if verbose:
-            print(
-                '%s[%s] %sPatient %s%s%s predicted survival = %s%f%s' % (
-                    c['c'], strftime("%H:%M:%S"),
-                    c['g'], c['b'], p_name, c['nc'],
-                    c['g'], survival, c['nc']
+        for p_name, image_names, features, slices, survival in zip(*patient):
+            survival_out = test_survival(net, [image_names], np.expand_dims(features, axis=0), slices, n_slices)
+            if verbose:
+                print(
+                    '%s[%s] %sPatient %s%s%s predicted survival = %s%f (%f)%s' % (
+                        c['c'], strftime("%H:%M:%S"),
+                        c['g'], c['b'], p_name, c['nc'],
+                        c['g'], survival_out, float(survival), c['nc']
+                    )
                 )
-            )
-        csvwriter.writerow([p_name, str(survival)])
+            csvwriter.writerow([p_name, str(survival_out)])
 
 
 def train_seg_function(image_names, label_names, brain_centers, save_path):
@@ -667,11 +676,11 @@ def test_seg(net, p, outputname, nlabels, mask=None, verbose=True):
                 print('%s[%s] %sTesting the network%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
             # Load only the patient images
             if verbose:
-                print('%s%s<Creating the probability map %s%s%s%s - %s%s%s %s>%s' % (
+                print('%s%s<Creating the probability map for %s%s%s%s - %s%s%s %s>%s' % (
                     ''.join([' '] * 14),
                     c['g'],
                     c['b'], p_name, c['nc'], c['g'],
-                    c['b'], outputname, c['nc'],
+                    c['b'], outputname_path, c['nc'],
                     c['g'], c['nc']
                 ))
             pr_maps = image_net.predict(x, batch_size=options['test_size'])
@@ -687,7 +696,7 @@ def test_seg(net, p, outputname, nlabels, mask=None, verbose=True):
                 image_names=[p],
                 list_of_centers=[test_centers],
                 patch_size=(conv_blocks * 2 + 3,) * 3,
-                verbose=True,
+                verbose=verbose,
             )
             if verbose:
                 print('%s- Concatenating the data x' % ' '.join([''] * 12))
@@ -714,6 +723,7 @@ def main():
     conv_width = options['conv_width']
     kernel_size_list = conv_width if isinstance(conv_width, list) else [conv_width] * conv_blocks
     # Data loading parameters
+    n_folds = options['n_folds']
 
     # Prepare the sufix that will be added to the results for the net and images
     filters_s = 'n'.join(['%d' % nf for nf in filters_list])
@@ -725,13 +735,13 @@ def main():
     images_s = flair_s + t1_s + t1ce_s + t2_s
     params_s = (options['netname'], images_s, options['nlabels'], patch_width, conv_s, filters_s, epochs)
     sufix = '.%s%s.l%d.p%d.c%s.n%s.e%d' % params_s
-    train_data, _ = get_names_from_path(options)
+    train_data, _ = get_names_from_path()
 
     unet_seg_results = list()
     unet_roi_results = list()
     ensemble_seg_results = list()
     ensemble_roi_results = list()
-    image_names, label_names = get_names_from_path(options)
+    image_names, label_names = get_names_from_path()
     print('%s[%s] %s<BRATS 2018 pipeline testing>%s' % (c['c'], strftime("%H:%M:%S"), c['y'], c['nc']))
     print('%s[%s] %sCenter computation%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     # Block center computation
@@ -762,6 +772,7 @@ def main():
             ))
 
             # > Training for everything
+
             net, ensemble = train_seg_function(train_images, train_labels, train_centers, save_path=patient_path)
 
             ''' Testing '''
@@ -789,7 +800,8 @@ def main():
                 p,
                 p_name,
                 options['nlabels'],
-                mask=image_unet.get_data().astype(np.bool)
+                mask=image_unet.get_data().astype(np.bool),
+                verbose=False
             )
 
             seg_dsc = check_dsc(label_names[i], image_cnn.get_data(), options['nlabels'])
@@ -827,19 +839,30 @@ def main():
         ''' Training '''
         simage_names, survival, features, slices = get_survival_data(options)
         print('%s[%s] %sStarting leave-one-out (survival)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-        with open(os.path.join(test_dir, 'survival_results.csv'), 'w') as csvfile:
+        with open(os.path.join(options['loo_dir'], 'survival_results.csv'), 'w') as csvfile:
             csvwriter = csv.writer(csvfile, delimiter=',')
-            for i in range(len(simage_names)):
-                # Data separation
-                p = simage_names[i]
-                train_images = np.asarray(simage_names.tolist()[:i] + simage_names.tolist()[i + 1:])
-                train_survival = np.asarray(survival.tolist()[:i] + survival.tolist()[i + 1:])
-                train_features = np.asarray(features.tolist()[:i] + features.tolist()[i + 1:])
-                train_slices = slices[:i] + slices[i + 1:]
+            for i in range(n_folds):
+                ini_p = len(simage_names) * i / 5
+                end_p = len(simage_names) * (i + 1) / 5
+                # Validation data
+                p = simage_names[ini_p:end_p]
+                p_features = features[ini_p:end_p]
+                p_slices = slices[ini_p:end_p]
+                p_survival = survival[ini_p:end_p]
+                # Training data
+                train_images = np.concatenate([simage_names[:ini_p, :], simage_names[end_p:, :]], axis=0)
+                train_survival = np.asarray(survival.tolist()[:ini_p] + survival.tolist()[end_p:])
+                train_features = np.asarray(features.tolist()[:ini_p] + features.tolist()[end_p:])
+                train_slices = slices[:ini_p] + slices[end_p:]
 
                 # Patient info
-                p_name = p[0].rsplit('/')[-2]
-                patient_path = '/'.join(p[0].rsplit('/')[:-1])
+                p_name = map(lambda pi: pi[0].rsplit('/')[-2], p)
+
+                # Data stuff
+                print('%s[%s] %sFold %s(%s%d%s%s/%d)%s' % (
+                    c['c'], strftime("%H:%M:%S"),
+                    c['g'], c['c'], c['b'], i + 1, c['nc'], c['c'], n_folds, c['nc']
+                ))
 
                 print(
                     '%s[%s] %sStarting training (%ssurvival%s)%s' % (
@@ -853,13 +876,14 @@ def main():
                     train_survival,
                     train_features,
                     train_slices,
-                    save_path=patient_path
+                    save_path=options['loo_dir'],
+                    sufix='-fold%d-' % i
                 )
 
                 test_survival_function(
                     snet,
-                    patient=(p_name, p, features[i], slices[i]),
-                    save_path=test_dir,
+                    patient=(p_name, p, p_features, p_slices, p_survival),
+                    save_path=options['loo_dir'],
                     csvwriter=csvwriter,
                     verbose=True
                 )
@@ -879,7 +903,7 @@ def main():
 
         ''' Testing '''
         print('%s[%s] %sStarting testing (segmentation)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-        test_image_names, _ = get_names_from_path(options, path=test_dir)
+        test_image_names, _ = get_names_from_path(path=test_dir)
         for i in range(len(test_image_names)):
             # Patient stuff
             p = test_image_names[i]
@@ -903,7 +927,8 @@ def main():
                 p,
                 p_name,
                 options['nlabels'],
-                mask=image_unet.get_data().astype(np.bool)
+                mask=image_unet.get_data().astype(np.bool),
+                verbose=False
             )
 
         ''' <Survival task> '''

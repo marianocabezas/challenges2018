@@ -60,7 +60,7 @@ def get_brats_unet(input_shape, filters_list, kernel_size_list, nlabels, drop=0.
     return net
 
 
-def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels = 2, drop=0.2):
+def get_brats_roinet(input_shape, filters_list, kernel_size_list, nlabels=2, drop=0.2):
     # Input
     inputs = Input(shape=input_shape, name='seg_inputs')
 
@@ -450,7 +450,7 @@ def get_brats_survival(n_slices=20, n_features=4):
     for layer in base_model.layers:
         layer.trainable = False
 
-    vgg_out = Average()(map(base_model, slice_inputs))
+    vgg_out = concatenate(map(base_model, slice_inputs))
 
     # Here we add the final layers to compute the survival value
     final_tensor = concatenate([feature_input, vgg_out])
