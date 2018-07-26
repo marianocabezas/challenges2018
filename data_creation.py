@@ -211,7 +211,6 @@ def get_patches_roi(
     return [x_d, x_c], y
 
 
-
 def majority_voting_patches(patches, image_size, patch_size, centers, datatype=np.uint8):
     """
     :param patches:

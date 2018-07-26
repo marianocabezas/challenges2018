@@ -1,8 +1,9 @@
 from keras import backend as K
-from keras.layers import Conv3D, Dropout, Input, Conv3DTranspose, Flatten, Dense, concatenate
-from keras.layers import Activation, Reshape, Permute, Lambda, Average
+from keras.layers import Conv2D, Conv3D, Conv3DTranspose, AveragePooling2D, Dropout, BatchNormalization
+from keras.layers import Input, Activation, Reshape, Permute, Lambda, Flatten, Dense, concatenate
 from keras.models import Model
 from keras.applications.vgg16 import VGG16
+from layers import ScalingLayer
 
 
 def dsc_loss(y_true, y_pred):
@@ -436,29 +437,60 @@ def get_brats_ensemble(n_channels, n_blocks, unet, cnn, fcnn, ucnn, nlabels):
     return ensemble
 
 
-def get_brats_survival(n_slices=20, n_features=4):
+def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.25):
     # Input (3D volume of X*X*S) + other features (age, tumor volumes and resection status?)
     # This volume should be split into S inputs that will be passed to S VGG models.
     vol_input = Input(shape=(224, 224, n_slices, 3), name='vol_input')
     slice_inputs = map(lambda i: Lambda(lambda l: l[:, :, :, i, :])(vol_input), range(n_slices))
 
-    feature_input = Input(shape=(n_features,), name='feat_input')
+    feature_input = Input(shape=(n_features, ), name='feat_input')
     inputs = [vol_input, feature_input]
 
     # VGG init
-    base_model = VGG16(weights='imagenet')
+    base_model = VGG16(weights='imagenet', include_top=False)
     for layer in base_model.layers:
         layer.trainable = False
 
-    vgg_out = concatenate(map(base_model, slice_inputs))
+    # vgg_out = map(base_model, slice_inputs)
+    vgg_out = map(BatchNormalization(), map(base_model, slice_inputs))
+
+    # - Conv2D
+    # vgg_fcc1 = Conv2D(512, (1, 1), activation='relu')
+    # vgg_fccout1 = map(Dropout(dropout),  map(vgg_fcc1, vgg_out))
+
+    vgg_fcc1 = ScalingLayer()
+    vgg_fccout1 = map(Dropout(dropout), map(Activation('relu'), map(vgg_fcc1, vgg_out)))
+
+    vgg_pool1 = AveragePooling2D(2)
+    vgg_poolout1 = map(vgg_pool1, vgg_fccout1)
+
+    # - Scaling layer
+    # vgg_fcc2 = ScalingLayer()
+    # vgg_fccout2 = map(Dropout(dropout), map(Activation('relu'), map(vgg_fcc2, vgg_poolout1)))
+
+    vgg_fcc2 = Conv2D(dense_size, (1, 1), activation='relu')
+    vgg_fccout2 = map(BatchNormalization(), map(Dropout(dropout), map(vgg_fcc2, vgg_poolout1)))
+
+    vgg_pool2 = AveragePooling2D(2)
+    vgg_poolout2 = map(vgg_pool2, vgg_fccout2)
+
+    # - Conv2D
+    # vgg_fcc3 = Conv2D(dense_size, (1, 1), activation='relu')
+    # vgg_fccout3 = map(Flatten(), map(Dropout(dropout), map(vgg_fcc3, vgg_poolout2)))
+
+    vgg_fcc3 = ScalingLayer()
+    vgg_fccout3 = map(Dropout(dropout), map(Activation('relu'), map(vgg_fcc3, vgg_poolout2)))
+
+    vgg_dense = Dense(dense_size, kernel_initializer='normal', activation='linear')
+    vgg_out = concatenate(map(Dropout(dropout), map(Flatten(), map(vgg_dense, vgg_fccout3))))
 
     # Here we add the final layers to compute the survival value
     final_tensor = concatenate([feature_input, vgg_out])
-    output = Dense(1, kernel_initializer='normal')(final_tensor)
+    output = Dense(1, kernel_initializer='normal', activation='linear')(final_tensor)
 
     survival_net = Model(inputs=inputs, outputs=output)
     survival_net.compile(
-        optimizer='rmsprop',
+        optimizer='adam',
         loss='mean_squared_error',
         metrics=['accuracy']
     )
