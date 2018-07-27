@@ -368,7 +368,7 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
     net = get_brats_survival(n_slices=n_slices, n_features=features.shape[-1])
     net_name = os.path.join(save_path, 'brats2018-survival%s.mdl' % sufix)
     net.save(net_name)
-    checkpoint = 'brats2018-survival%s.hdf5' % sufix
+    # checkpoint = 'brats2018-survival%s.hdf5' % sufix
     # net.summary()
 
     ''' Training '''
@@ -412,6 +412,7 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
             )
         except IOError:
 
+            ''' Normal version '''
             # # callbacks = [
             # #     EarlyStopping(
             # #         monitor='val_loss',
@@ -449,9 +450,13 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
             # net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
             # net.load_weights(os.path.join(save_path, checkpoint))
 
+            ''' Curriculum learning version '''
             sorted_idx = np.squeeze(np.argsort(survival, axis=0))
             for i in range(train_steps):
                 checkpoint = 'brats2018-survival%s-step%d.hdf5' % (sufix, i)
+                net = get_brats_survival(n_slices=n_slices, n_features=features.shape[-1])
+                net_name = os.path.join(save_path, 'brats2018-survival%s.mdl' % sufix)
+                net.save(net_name)
                 try:
                     net.load_weights(os.path.join(save_path, checkpoint))
                     print(
@@ -488,6 +493,42 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
 
                     net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
                     net.load_weights(os.path.join(save_path, checkpoint))
+
+            ''' Average version '''
+            # for i in range(train_steps):
+            #     checkpoint = 'brats2018-survival%s-step%d.hdf5' % (sufix, i)
+            #     try:
+            #         net.load_weights(os.path.join(save_path, checkpoint))
+            #         print(
+            #             '%s[%s] %sSurvival network weights %sloaded%s' % (
+            #                 c['c'], strftime("%H:%M:%S"), c['g'],
+            #                 c['b'], c['nc']
+            #             )
+            #         )
+            #     except IOError:
+            #         callbacks = [
+            #             EarlyStopping(
+            #                 monitor='loss',
+            #                 patience=options['spatience']
+            #             ),
+            #             ModelCheckpoint(
+            #                 os.path.join(save_path, checkpoint),
+            #                 monitor='loss',
+            #                 save_best_only=True
+            #             )
+            #         ]
+            #
+            #         print('%s- Randomising the training data' % ' '.join([''] * 12))
+            #         idx = np.random.permutation(range(len(features)))
+            #
+            #         x_vol = x_vol[idx].astype(np.float32)
+            #         x_feat = features[idx].astype(np.float32)
+            #         x = [x_vol, x_feat]
+            #
+            #         y = survival[idx].astype(np.float32)
+            #
+            #         net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
+            #         net.load_weights(os.path.join(save_path, checkpoint))
 
     return net
 
