@@ -12,6 +12,7 @@ from data_creation import get_patch_labels, get_data, get_labels, load_images, g
 from data_manipulation.metrics import dsc_seg
 from nets import get_brats_unet, get_brats_invunet, get_brats_ensemble, get_brats_nets, get_brats_survival
 from keras import backend as K
+from keras.applications.resnet50 import preprocess_input
 
 
 def parse_inputs():
@@ -203,13 +204,16 @@ def get_patient_survival_features(path, p, p_features, test=False):
     roi_sufix = '_seg.nii.gz' if not test else '.nii.gz'
     roi = load_nii(os.path.join(path, p, p + roi_sufix)).get_data()
     brain = load_nii(os.path.join(path, p, p + options['t1'])).get_data()
-    vol_features = map(lambda l: np.count_nonzero(roi == l), [1, 2, 4])
-    features = [[float(p_features['Age'])] + vol_features]
+    brain_vol = np.count_nonzero(brain)
+    vol_features = map(lambda l: np.count_nonzero(roi == l) / brain_vol, [1, 2, 4])
+    age_features = [float(p_features['Age']) / 100]
+    # features = [age_features + vol_features]
+    features = [age_features]
 
     return features
 
 
-def get_patient_roi_slice(path, p, test=False):
+def get_patient_roi_slice(path, p):
     options = parse_inputs()
     n_slices = options['n_slices']
 
@@ -249,6 +253,7 @@ def get_survival_data(options, recession=list(['GTR', 'STR', 'NA']), test=False)
 
         flair_names = list()
         t1_names = list()
+        t2_names = list()
         t1ce_names = list()
         survival = list()
         features = list()
@@ -259,23 +264,23 @@ def get_survival_data(options, recession=list(['GTR', 'STR', 'NA']), test=False)
                 flair_names += [os.path.join(path, k, k + options['flair'])]
                 t1_names += [os.path.join(path, k, k + options['t1'])]
                 t1ce_names += [os.path.join(path, k, k + options['t1ce'])]
+                t2_names += [os.path.join(path, k, k + options['t2'])]
                 features += get_patient_survival_features(path, k, v, test)
-                slices += get_patient_roi_slice(path, k, test)
+                slices += get_patient_roi_slice(path, k)
                 if not test:
                     survival += [float(v['Survival'])]
                 else:
                     names += [k]
 
-        image_names = np.stack([flair_names, t1_names, t1ce_names], axis=1)
+        image_names = np.stack([flair_names, t1_names, t1ce_names, t2_names], axis=1)
 
-        # f_mean = map(np.mean, zip(*features))
-        # f_std = map(np.mean, zip(*features))
-        # features = np.stack(map(lambda f: (np.array(f, dtype=np.float32) - f_mean) / f_std, features), axis=0)
+    features = np.array(features)
 
     if not test:
-        packed_return = (image_names, np.expand_dims(survival, axis=-1), np.array(features), slices)
+        survival = np.expand_dims(survival, axis=-1)
+        packed_return = (image_names, survival, features, slices)
     else:
-        packed_return = (names, image_names, np.array(features), slices)
+        packed_return = (names, image_names, features, slices)
 
     return packed_return
 
@@ -365,17 +370,6 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
     net_name = os.path.join(save_path, 'brats2018-survival%s.mdl' % sufix)
     net.save(net_name)
     checkpoint = 'brats2018-survival%s.hdf5' % sufix
-    callbacks = [
-        EarlyStopping(
-            monitor='val_loss',
-            patience=options['spatience']
-        ),
-        ModelCheckpoint(
-            os.path.join(save_path, checkpoint),
-            monitor='val_loss',
-            save_best_only=True
-        )
-    ]
     # net.summary()
 
     ''' Training '''
@@ -400,13 +394,16 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
         # Data preparation
         x_vol = get_reshaped_data(image_names, slices, (224, 224), n_slices=n_slices, verbose=True)
         print('%s- Concatenating the data' % ' '.join([''] * 12))
-        x_vol = np.stack(x_vol, axis=0)
+        x_vol = preprocess_input(np.stack(x_vol, axis=0))
 
         print('%s-- X (volume) shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, x_vol.shape))))
         print('%s-- X (features) shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, features.shape))))
         print('%s-- Y shape: (%s)' % (' '.join([''] * 12), ', '.join(map(str, survival.shape))))
 
+        # checkpoint = 'brats2018-survival%s-step.hdf5' % sufix
+
         try:
+            # net.load_weights(os.path.join(save_path, checkpoint))
             net.load_weights(os.path.join(save_path, 'brats2018-survival%s-step%d.hdf5' % (sufix, train_steps - 1)))
             print(
                 '%s[%s] %sSurvival network weights %sloaded%s' % (
@@ -416,69 +413,82 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
             )
         except IOError:
 
-            sorted_idx = np.squeeze(np.argsort(survival, axis=0))
-            for i in range(train_steps):
-                checkpoint = 'brats2018-survival%s-step%d.hdf5' % (sufix, i)
-                try:
-                    net.load_weights(os.path.join(save_path, checkpoint))
-                    print(
-                        '%s[%s] %sSurvival network weights %sloaded%s' % (
-                            c['c'], strftime("%H:%M:%S"), c['g'],
-                            c['b'], c['nc']
-                        )
-                    )
-                except IOError:
-                    print('%s- Selecting the next set of samples (step %d/%d)' %
-                          (' '.join([''] * 12), i + 1, train_steps))
-                    current_idx = np.concatenate([
-                        sorted_idx[:((i + 1) * len(sorted_idx)) / (2 * train_steps)],
-                        sorted_idx[-((i + 1) * len(sorted_idx)) / (2 * train_steps):],
-                    ])
+            # callbacks = [
+            #     EarlyStopping(
+            #         monitor='val_loss',
+            #         patience=options['spatience']
+            #     ),
+            #     ModelCheckpoint(
+            #         os.path.join(save_path, checkpoint),
+            #         monitor='val_loss',
+            #         save_best_only=True
+            #     )
+            # ]
 
-                    # callbacks = [
-                    #     EarlyStopping(
-                    #         monitor='val_loss',
-                    #         patience=options['spatience']
-                    #     ),
-                    #     ModelCheckpoint(
-                    #         os.path.join(save_path, checkpoint),
-                    #         monitor='val_loss',
-                    #         save_best_only=True
-                    #     )
-                    # ]
-                    callbacks = [
-                        EarlyStopping(
-                            monitor='loss',
-                            patience=options['spatience']
-                        ),
-                        ModelCheckpoint(
-                            os.path.join(save_path, checkpoint),
-                            monitor='loss',
-                            save_best_only=True
-                        )
-                    ]
+            callbacks = [
+                            EarlyStopping(
+                                monitor='loss',
+                                patience=options['spatience']
+                            ),
+                            ModelCheckpoint(
+                                os.path.join(save_path, checkpoint),
+                                monitor='loss',
+                                save_best_only=True
+                            )
+                        ]
 
-                    idx = np.random.permutation(range(len(current_idx)))
+            print('%s- Randomising the training data' % ' '.join([''] * 12))
+            idx = np.random.permutation(range(len(features)))
 
-                    x = [x_vol[current_idx][idx].astype(np.float32), features[current_idx][idx].astype(np.float32)]
+            x_vol = x_vol[idx].astype(np.float32)
+            x_feat = features[idx].astype(np.float32)
+            x = [x_vol, x_feat]
 
-                    y = survival[current_idx][idx].astype(np.float32)
+            y = survival[idx].astype(np.float32)
 
-                    net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
-                    # net.fit(x, y, batch_size=8, validation_split=options['sval_rate'], epochs=epochs, callbacks=callbacks)
-                    # net.load_weights(os.path.join(save_path, checkpoint))
+            # net.fit(x, y, batch_size=8, validation_split=options['sval_rate'], epochs=epochs, callbacks=callbacks)
+            net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
+            net.load_weights(os.path.join(save_path, checkpoint))
 
-        # print('%s- Randomising the training data' % ' '.join([''] * 12))
-        # idx = np.random.permutation(range(len(features)))
-        #
-        # x_vol = x_vol[idx].astype(np.float32)
-        # x_feat = features[idx].astype(np.float32)
-        # x = [x_vol, x_feat]
-        #
-        # y = survival[idx].astype(np.float32)
-        #
-        # net.fit(x, y, batch_size=8, validation_split=options['sval_rate'], epochs=epochs, callbacks=callbacks)
-        # net.load_weights(os.path.join(save_path, checkpoint))
+            # sorted_idx = np.squeeze(np.argsort(survival, axis=0))
+            # for i in range(train_steps):
+            #     checkpoint = 'brats2018-survival%s-step%d.hdf5' % (sufix, i)
+            #     try:
+            #         net.load_weights(os.path.join(save_path, checkpoint))
+            #         print(
+            #             '%s[%s] %sSurvival network weights %sloaded%s' % (
+            #                 c['c'], strftime("%H:%M:%S"), c['g'],
+            #                 c['b'], c['nc']
+            #             )
+            #         )
+            #     except IOError:
+            #         print('%s- Selecting the next set of samples (step %d/%d)' %
+            #               (' '.join([''] * 12), i + 1, train_steps))
+            #         current_idx = np.concatenate([
+            #             sorted_idx[:((i + 1) * len(sorted_idx)) / (2 * train_steps)],
+            #             sorted_idx[-((i + 1) * len(sorted_idx)) / (2 * train_steps):],
+            #         ])
+            #
+            #         callbacks = [
+            #             EarlyStopping(
+            #                 monitor='loss',
+            #                 patience=options['spatience']
+            #             ),
+            #             ModelCheckpoint(
+            #                 os.path.join(save_path, checkpoint),
+            #                 monitor='loss',
+            #                 save_best_only=True
+            #             )
+            #         ]
+            #
+            #         idx = np.random.permutation(range(len(current_idx)))
+            #
+            #         x = [x_vol[current_idx][idx].astype(np.float32), features[current_idx][idx].astype(np.float32)]
+            #
+            #         y = survival[current_idx][idx].astype(np.float32)
+            #
+            #         net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
+            #         net.load_weights(os.path.join(save_path, checkpoint))
 
     return net
 
@@ -892,6 +902,7 @@ def main():
 
         ''' <Survival task> '''
         tst_simage_names, tst_survival, tst_features, tst_slices = get_survival_data(options, recession=['GTR'])
+        max_survival = np.max(tst_survival)
         n_folds = len(tst_simage_names)
         print('%s[%s] %sStarting leave-one-out (survival)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
         with open(os.path.join(options['loo_dir'], 'survival_results.csv'), 'w') as csvfile:
@@ -937,7 +948,7 @@ def main():
 
                 snet = train_survival_function(
                     train_images,
-                    train_survival,
+                    train_survival / max_survival,
                     train_features,
                     train_slices,
                     save_path=options['loo_dir'],
@@ -951,7 +962,7 @@ def main():
                     p_features,
                     p_slices,
                     options['n_slices']
-                )
+                ) * max_survival
                 print(
                     '%s[%s] %sPatient %s%s%s predicted survival = %s%f (%f)%s' % (
                         c['c'], strftime("%H:%M:%S"),
@@ -1015,7 +1026,8 @@ def main():
             )
         )
         simage_names, survival, features, slices = get_survival_data(options)
-        snet = train_survival_function(image_names, survival, features, slices, save_path=test_dir)
+        max_survival = np.max(survival)
+        snet = train_survival_function(image_names, survival / max_survival, features, slices, save_path=test_dir)
 
         ''' Testing '''
         with open(os.path.join(test_dir, 'survival_results.csv'), 'w') as csvfile:
@@ -1027,7 +1039,7 @@ def main():
                 features,
                 slices,
                 options['n_slices']
-            )
+            ) * max_survival
             for i, (p_name_i, pred_survival_i) in enumerate(zip(names, survival_out)):
                 print(
                     '%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s predicted survival = %s%f%s' % (

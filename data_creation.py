@@ -6,6 +6,7 @@ from itertools import chain, product, izip
 from keras.utils import to_categorical
 from data_manipulation.generate_features import get_patches, get_mask_voxels
 from skimage.transform import resize
+from sklearn import decomposition
 
 
 """
@@ -117,28 +118,26 @@ def get_reshaped_data(
     if verbose:
         print('%s- Loading x' % ' '.join([''] * 12))
 
-    def load_normalised_patch(name, slice):
-        image = load_nii(name).get_data()[slice].astype(np.float32)
-        value_range_half = image.max() - image.min()
-        image -= value_range_half
-        image /= value_range_half
-        return image
+    def load_patient_data(names, slices, components=3):
+        # Load the images first
+        data = np.stack(
+            map(lambda im: load_nii(im).get_data()[slices].astype(np.float32), names),
+            axis=0,
+        ).astype(dtype=datatype)
 
-    x = map(
-        lambda (p, s): np.moveaxis(
-            resize(
-                np.stack(
-                    map(lambda im: load_normalised_patch(im, s), p),
-                    axis=0,
-                ).astype(dtype=datatype),
-                (3,) + slice_shape + (n_slices,),
-                mode='constant',
-                anti_aliasing=True
-            ),
-            0, -1
-        ),
-        zip(image_names, slices)
-    )
+        # Prepare data for PCA and do it
+        pca = decomposition.PCA(n_components=components)
+        data_shape = (components,) + data.shape[1:]
+        data_pca = pca.fit_transform(np.reshape(data, (len(data), -1)).T).T
+        data_pca = np.reshape(data_pca, data_shape)
+        data_pca = (data_pca - np.min(data_pca, axis=0)) / (np.max(data_pca, axis=0) - np.min(data_pca, axis=0))
+
+        # Prepare data for the final slice shape
+        final_shape = (3,) + slice_shape + (n_slices,)
+        data_final = resize(data_pca, final_shape, mode='constant', anti_aliasing=True)
+        return np.moveaxis(data_final, 0, -1)
+
+    x = map(lambda (i, s): load_patient_data(i, s), zip(image_names, slices))
 
     return x
 
