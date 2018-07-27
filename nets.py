@@ -437,7 +437,7 @@ def get_brats_ensemble(n_channels, n_blocks, unet, cnn, fcnn, ucnn, nlabels):
     return ensemble
 
 
-def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.25):
+def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.1):
     # Input (3D volume of X*X*S) + other features (age, tumor volumes and resection status?)
     # This volume should be split into S inputs that will be passed to S VGG models.
     vol_input = Input(shape=(224, 224, n_slices, 3), name='vol_input')

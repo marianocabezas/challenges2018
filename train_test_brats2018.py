@@ -207,8 +207,7 @@ def get_patient_survival_features(path, p, p_features, test=False):
     brain_vol = np.count_nonzero(brain)
     vol_features = map(lambda l: np.count_nonzero(roi == l) / brain_vol, [1, 2, 4])
     age_features = [float(p_features['Age']) / 100]
-    # features = [age_features + vol_features]
-    features = [age_features]
+    features = [age_features + vol_features]
 
     return features
 
@@ -413,82 +412,82 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
             )
         except IOError:
 
+            # # callbacks = [
+            # #     EarlyStopping(
+            # #         monitor='val_loss',
+            # #         patience=options['spatience']
+            # #     ),
+            # #     ModelCheckpoint(
+            # #         os.path.join(save_path, checkpoint),
+            # #         monitor='val_loss',
+            # #         save_best_only=True
+            # #     )
+            # # ]
+            #
             # callbacks = [
-            #     EarlyStopping(
-            #         monitor='val_loss',
-            #         patience=options['spatience']
-            #     ),
-            #     ModelCheckpoint(
-            #         os.path.join(save_path, checkpoint),
-            #         monitor='val_loss',
-            #         save_best_only=True
-            #     )
-            # ]
-
-            callbacks = [
-                            EarlyStopping(
-                                monitor='loss',
-                                patience=options['spatience']
-                            ),
-                            ModelCheckpoint(
-                                os.path.join(save_path, checkpoint),
-                                monitor='loss',
-                                save_best_only=True
-                            )
-                        ]
-
-            print('%s- Randomising the training data' % ' '.join([''] * 12))
-            idx = np.random.permutation(range(len(features)))
-
-            x_vol = x_vol[idx].astype(np.float32)
-            x_feat = features[idx].astype(np.float32)
-            x = [x_vol, x_feat]
-
-            y = survival[idx].astype(np.float32)
-
-            # net.fit(x, y, batch_size=8, validation_split=options['sval_rate'], epochs=epochs, callbacks=callbacks)
-            net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
-            net.load_weights(os.path.join(save_path, checkpoint))
-
-            # sorted_idx = np.squeeze(np.argsort(survival, axis=0))
-            # for i in range(train_steps):
-            #     checkpoint = 'brats2018-survival%s-step%d.hdf5' % (sufix, i)
-            #     try:
-            #         net.load_weights(os.path.join(save_path, checkpoint))
-            #         print(
-            #             '%s[%s] %sSurvival network weights %sloaded%s' % (
-            #                 c['c'], strftime("%H:%M:%S"), c['g'],
-            #                 c['b'], c['nc']
-            #             )
-            #         )
-            #     except IOError:
-            #         print('%s- Selecting the next set of samples (step %d/%d)' %
-            #               (' '.join([''] * 12), i + 1, train_steps))
-            #         current_idx = np.concatenate([
-            #             sorted_idx[:((i + 1) * len(sorted_idx)) / (2 * train_steps)],
-            #             sorted_idx[-((i + 1) * len(sorted_idx)) / (2 * train_steps):],
-            #         ])
+            #                 EarlyStopping(
+            #                     monitor='loss',
+            #                     patience=options['spatience']
+            #                 ),
+            #                 ModelCheckpoint(
+            #                     os.path.join(save_path, checkpoint),
+            #                     monitor='loss',
+            #                     save_best_only=True
+            #                 )
+            #             ]
             #
-            #         callbacks = [
-            #             EarlyStopping(
-            #                 monitor='loss',
-            #                 patience=options['spatience']
-            #             ),
-            #             ModelCheckpoint(
-            #                 os.path.join(save_path, checkpoint),
-            #                 monitor='loss',
-            #                 save_best_only=True
-            #             )
-            #         ]
+            # print('%s- Randomising the training data' % ' '.join([''] * 12))
+            # idx = np.random.permutation(range(len(features)))
             #
-            #         idx = np.random.permutation(range(len(current_idx)))
+            # x_vol = x_vol[idx].astype(np.float32)
+            # x_feat = features[idx].astype(np.float32)
+            # x = [x_vol, x_feat]
             #
-            #         x = [x_vol[current_idx][idx].astype(np.float32), features[current_idx][idx].astype(np.float32)]
+            # y = survival[idx].astype(np.float32)
             #
-            #         y = survival[current_idx][idx].astype(np.float32)
-            #
-            #         net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
-            #         net.load_weights(os.path.join(save_path, checkpoint))
+            # # net.fit(x, y, batch_size=8, validation_split=options['sval_rate'], epochs=epochs, callbacks=callbacks)
+            # net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
+            # net.load_weights(os.path.join(save_path, checkpoint))
+
+            sorted_idx = np.squeeze(np.argsort(survival, axis=0))
+            for i in range(train_steps):
+                checkpoint = 'brats2018-survival%s-step%d.hdf5' % (sufix, i)
+                try:
+                    net.load_weights(os.path.join(save_path, checkpoint))
+                    print(
+                        '%s[%s] %sSurvival network weights %sloaded%s' % (
+                            c['c'], strftime("%H:%M:%S"), c['g'],
+                            c['b'], c['nc']
+                        )
+                    )
+                except IOError:
+                    print('%s- Selecting the next set of samples (step %d/%d)' %
+                          (' '.join([''] * 12), i + 1, train_steps))
+                    current_idx = np.concatenate([
+                        sorted_idx[:((i + 1) * len(sorted_idx)) / (2 * train_steps)],
+                        sorted_idx[-((i + 1) * len(sorted_idx)) / (2 * train_steps):],
+                    ])
+
+                    callbacks = [
+                        EarlyStopping(
+                            monitor='loss',
+                            patience=options['spatience']
+                        ),
+                        ModelCheckpoint(
+                            os.path.join(save_path, checkpoint),
+                            monitor='loss',
+                            save_best_only=True
+                        )
+                    ]
+
+                    idx = np.random.permutation(range(len(current_idx)))
+
+                    x = [x_vol[current_idx][idx].astype(np.float32), features[current_idx][idx].astype(np.float32)]
+
+                    y = survival[current_idx][idx].astype(np.float32)
+
+                    net.fit(x, y, batch_size=8, epochs=epochs, callbacks=callbacks)
+                    net.load_weights(os.path.join(save_path, checkpoint))
 
     return net
 
