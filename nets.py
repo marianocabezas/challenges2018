@@ -437,7 +437,7 @@ def get_brats_ensemble(n_channels, n_blocks, unet, cnn, fcnn, ucnn, nlabels):
     return ensemble
 
 
-def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.1):
+def get_brats_survival(thresholds=[300, 450],n_slices=20, n_features=4, dense_size=256, dropout=0.1):
     # Input (3D volume of X*X*S) + other features (age, tumor volumes and resection status?)
     # This volume should be split into S inputs that will be passed to S VGG models.
     vol_input = Input(shape=(224, 224, n_slices, 3), name='vol_input')
@@ -487,7 +487,7 @@ def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.1):
     # Here we add the final layers to compute the survival value
     final_tensor = concatenate([feature_input, vgg_out])
     output = Dense(1, kernel_initializer='normal', activation='linear', name='survival')(final_tensor)
-    output_cat = Activation('softmax')(ThresholdingLayer(thresholds=[300, 450])(output))
+    output_cat = Activation('softmax')(ThresholdingLayer(thresholds=thresholds)(output))
     # output_cat = Dense(3, activation='softmax')(output)
 
     survival_net = Model(inputs=inputs, outputs=[output, output_cat])
