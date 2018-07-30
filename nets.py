@@ -3,7 +3,7 @@ from keras.layers import Conv2D, Conv3D, Conv3DTranspose, AveragePooling2D, Drop
 from keras.layers import Input, Activation, Reshape, Permute, Lambda, Flatten, Dense, concatenate
 from keras.models import Model
 from keras.applications.vgg16 import VGG16
-from layers import ScalingLayer
+from layers import ScalingLayer, ThresholdingLayer
 
 
 def dsc_loss(y_true, y_pred):
@@ -486,12 +486,14 @@ def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.1):
 
     # Here we add the final layers to compute the survival value
     final_tensor = concatenate([feature_input, vgg_out])
-    output = Dense(1, kernel_initializer='normal', activation='linear')(final_tensor)
+    output = Dense(1, kernel_initializer='normal', activation='linear', name='survival')(final_tensor)
+    # output_cat = Activation('softmax')(ThresholdingLayer(thresholds=[300, 450])(output))
+    output_cat = Dense(3, activation='softmax')(output)
 
-    survival_net = Model(inputs=inputs, outputs=output)
+    survival_net = Model(inputs=inputs, outputs=[output, output_cat])
     survival_net.compile(
         optimizer='adam',
-        loss='mean_squared_error',
+        loss=['mean_squared_error', 'categorical_crossentropy'],
         metrics=['accuracy']
     )
 
