@@ -356,7 +356,7 @@ def get_cluster_labels(centers, names, nlabels):
     return y
 
 
-def train_survival_function(image_names, survival, features, slices, save_path, sufix=''):
+def train_survival_function(image_names, survival, features, slices, save_path, thresholds, sufix=''):
     # Init
     options = parse_inputs()
     c = color_codes()
@@ -365,7 +365,7 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
     n_slices = options['n_slices']
 
     ''' Net preparation '''
-    net = get_brats_survival(n_slices=n_slices, n_features=features.shape[-1])
+    net = get_brats_survival(thresholds=thresholds, n_slices=n_slices, n_features=features.shape[-1])
     net_name = os.path.join(save_path, 'brats2018-survival%s.mdl' % sufix)
     net.save(net_name)
     # checkpoint = 'brats2018-survival%s.hdf5' % sufix
@@ -992,6 +992,7 @@ def main():
                     train_survival / max_survival,
                     train_features,
                     train_slices,
+                    thresholds = [300 / max_survival, 450 / max_survival],
                     save_path=options['loo_dir'],
                     sufix='-fold%d' % i
                 )
@@ -1068,7 +1069,14 @@ def main():
         )
         simage_names, survival, features, slices = get_survival_data(options)
         max_survival = np.max(survival)
-        snet = train_survival_function(image_names, survival / max_survival, features, slices, save_path=test_dir)
+        snet = train_survival_function(
+            image_names,
+            survival / max_survival,
+            features,
+            slices,
+            thresholds=[300 / max_survival, 450 / max_survival],
+            save_path=test_dir
+        )
 
         ''' Testing '''
         with open(os.path.join(test_dir, 'survival_results.csv'), 'w') as csvfile:
