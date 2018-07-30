@@ -427,12 +427,12 @@ def train_survival_function(image_names, survival, features, slices, save_path, 
 
             callbacks = [
                 EarlyStopping(
-                    monitor='survival_loss',
+                    monitor='cat_survival_acc',
                     patience=options['spatience']
                 ),
                 ModelCheckpoint(
                     os.path.join(save_path, checkpoint),
-                    monitor='survival_loss',
+                    monitor='cat_survival_acc',
                     save_best_only=True
                 )
             ]
