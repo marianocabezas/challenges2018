@@ -487,8 +487,8 @@ def get_brats_survival(n_slices=20, n_features=4, dense_size=256, dropout=0.1):
     # Here we add the final layers to compute the survival value
     final_tensor = concatenate([feature_input, vgg_out])
     output = Dense(1, kernel_initializer='normal', activation='linear', name='survival')(final_tensor)
-    # output_cat = Activation('softmax')(ThresholdingLayer(thresholds=[300, 450])(output))
-    output_cat = Dense(3, activation='softmax')(output)
+    output_cat = Activation('softmax')(ThresholdingLayer(thresholds=[300, 450])(output))
+    # output_cat = Dense(3, activation='softmax')(output)
 
     survival_net = Model(inputs=inputs, outputs=[output, output_cat])
     survival_net.compile(
