@@ -859,8 +859,8 @@ def main():
     print('%s[%s] %s<BRATS 2018 pipeline testing>%s' % (c['c'], strftime("%H:%M:%S"), c['y'], c['nc']))
     print('%s[%s] %sCenter computation%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     # Block center computation
-    # overlap = 0 if options['netname'] != 'roinet' else patch_width / 4
-    # brain_centers = get_bounding_centers(image_names, patch_width, overlap)
+    overlap = 0 if options['netname'] != 'roinet' else patch_width / 4
+    brain_centers = get_bounding_centers(image_names, patch_width, overlap)
     test_dir = options['train_dir'][1] if options['train_dir'] is not None else None
 
     if test_dir is None:
