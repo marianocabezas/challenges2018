@@ -465,11 +465,12 @@ def get_brats_survival(thresholds=[300, 450],n_slices=20, n_features=4, dense_si
     vgg_poolout1 = map(vgg_pool1, vgg_fccout1)
 
     # - Scaling layer
-    # vgg_fcc2 = ScalingLayer()
-    # vgg_fccout2 = map(Dropout(dropout), map(Activation('relu'), map(vgg_fcc2, vgg_poolout1)))
+    vgg_fcc2 = ScalingLayer()
+    vgg_fccout2 = map(Dropout(dropout), map(Activation('relu'), map(vgg_fcc2, vgg_poolout1)))
 
-    vgg_fcc2 = Conv2D(dense_size, (1, 1), activation='relu')
-    vgg_fccout2 = map(BatchNormalization(), map(Dropout(dropout), map(vgg_fcc2, vgg_poolout1)))
+    # - Conv2D
+    # vgg_fcc2 = Conv2D(dense_size, (1, 1), activation='relu')
+    # vgg_fccout2 = map(BatchNormalization(), map(Dropout(dropout), map(vgg_fcc2, vgg_poolout1)))
 
     vgg_pool2 = AveragePooling2D(2)
     vgg_poolout2 = map(vgg_pool2, vgg_fccout2)
@@ -494,6 +495,7 @@ def get_brats_survival(thresholds=[300, 450],n_slices=20, n_features=4, dense_si
     survival_net.compile(
         optimizer='adam',
         loss=['mean_squared_error', 'categorical_crossentropy'],
+        loss_weights=[200, 1],
         metrics=['accuracy']
     )
 
