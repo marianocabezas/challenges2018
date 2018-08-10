@@ -1017,46 +1017,44 @@ def main():
     else:
         ''' <Segmentation task> '''
 
-        # TODO: Revert changes
-        # ''' Training'''
-        # print(
-        #     '%s[%s] %sStarting training (%ssegmentation%s)%s' % (
-        #         c['c'], strftime("%H:%M:%S"),
-        #         c['g'], c['b'], c['nc'] + c['g'], c['nc']
-        #     )
-        # )
-        #
-        # net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=test_dir)
-        #
-        # ''' Testing '''
-        # print('%s[%s] %sStarting testing (segmentation)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
-        # test_image_names, _ = get_names_from_path(path=test_dir)
-        # for i in range(len(test_image_names)):
-        #     # Patient stuff
-        #     p = test_image_names[i]
-        #     p_name = p[0].rsplit('/')[-2]
-        #     print('%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
-        #         c['c'], strftime("%H:%M:%S"),
-        #         c['g'], c['b'], p_name, c['nc'],
-        #         c['c'], c['b'], i+1, c['nc'], c['c'], len(test_image_names), c['nc']
-        #     ))
-        #
-        #     # > Testing for the tumor ROI
-        #     #
-        #     # We first test with the ROI segmentation net.
-        #     image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
-        #
-        #     # > Testing for the tumor inside the ROI
-        #     #
-        #     # All we need to do now is test with the ensemble.
-        #     test_seg(
-        #         ensemble,
-        #         p,
-        #         p_name,
-        #         options['nlabels'],
-        #         mask=image_unet.get_data().astype(np.bool),
-        #         verbose=False
-        #     )
+        print(
+            '%s[%s] %sStarting training (%ssegmentation%s)%s' % (
+                c['c'], strftime("%H:%M:%S"),
+                c['g'], c['b'], c['nc'] + c['g'], c['nc']
+            )
+        )
+        
+        net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=test_dir)
+        
+        ''' Testing '''
+        print('%s[%s] %sStarting testing (segmentation)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
+        test_image_names, _ = get_names_from_path(path=test_dir)
+        for i in range(len(test_image_names)):
+            # Patient stuff
+            p = test_image_names[i]
+            p_name = p[0].rsplit('/')[-2]
+            print('%s[%s] %sPatient %s%s%s %s(%s%d%s%s/%d)%s' % (
+                c['c'], strftime("%H:%M:%S"),
+                c['g'], c['b'], p_name, c['nc'],
+                c['c'], c['b'], i+1, c['nc'], c['c'], len(test_image_names), c['nc']
+            ))
+        
+            # > Testing for the tumor ROI
+            #
+            # We first test with the ROI segmentation net.
+            image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
+        
+            # > Testing for the tumor inside the ROI
+            #
+            # All we need to do now is test with the ensemble.
+            test_seg(
+                ensemble,
+                p,
+                p_name,
+                options['nlabels'],
+                mask=image_unet.get_data().astype(np.bool),
+                verbose=False
+            )
 
         ''' <Survival task> '''
 
