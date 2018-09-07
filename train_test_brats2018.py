@@ -1000,7 +1000,7 @@ def main():
                     train_survival / max_survival,
                     train_features,
                     train_slices,
-                    thresholds = [300 / max_survival, 450 / max_survival],
+                    thresholds=[300 / max_survival, 450 / max_survival],
                     save_path=options['loo_dir'],
                     sufix='-fold%d' % i
                 )
@@ -1023,6 +1023,9 @@ def main():
                 csvwriter.writerow([p_name[0], '%f' % float(survival_out)])
 
     else:
+
+        train_dir = options['train_dir'][0]
+
         ''' <Segmentation task> '''
 
         print(
@@ -1031,9 +1034,10 @@ def main():
                 c['g'], c['b'], c['nc'] + c['g'], c['nc']
             )
         )
-        
-        net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=test_dir)
-        
+
+        # net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=test_dir)
+        net, ensemble = train_seg_function(image_names, label_names, brain_centers, save_path=train_dir)
+
         ''' Testing '''
         print('%s[%s] %sStarting testing (segmentation)%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
         test_image_names, _ = get_names_from_path(path=test_dir)
@@ -1046,12 +1050,12 @@ def main():
                 c['g'], c['b'], p_name, c['nc'],
                 c['c'], c['b'], i+1, c['nc'], c['c'], len(test_image_names), c['nc']
             ))
-        
+
             # > Testing for the tumor ROI
             #
             # We first test with the ROI segmentation net.
             image_unet = test_seg(net, p, p_name + '.unet.test' + sufix, options['nlabels'])
-        
+
             # > Testing for the tumor inside the ROI
             #
             # All we need to do now is test with the ensemble.
@@ -1081,7 +1085,7 @@ def main():
             features,
             slices,
             thresholds=[300 / max_survival, 450 / max_survival],
-            save_path=test_dir
+            save_path=train_dir
         )
 
         ''' Testing '''
