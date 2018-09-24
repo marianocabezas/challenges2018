@@ -1,4 +1,6 @@
+#!/usr/bin/python
 from __future__ import print_function
+import os
 from time import strftime
 import numpy as np
 from nibabel import load as load_nii
@@ -27,6 +29,7 @@ def main():
     # Network loading and testing
     print('%s[%s] %sTesting the Unet%s' % (c['c'], strftime("%H:%M:%S"), c['g'], c['nc']))
     net = get_brats_unet(x.shape[1:], [32] * 5, [3] * 5, nlabels)
+    net.load_weights('/usr/local/models/brats18-unet.hdf5')
     pr_maps = net.predict(x)
     image = np.argmax(pr_maps, axis=-1).reshape(x.shape[2:])
     mask = get_biggest_region(image).astype(np.bool)
@@ -40,7 +43,7 @@ def main():
     x = get_data(
         image_names=[image_names],
         list_of_centers=[test_centers],
-        patch_size=(5 * 2 + 3,) * 3,
+        patch_size=(9,) * 3,
         verbose=True,
     )
     print('%s- Concatenating the data x' % ' '.join([''] * 12))
@@ -48,7 +51,7 @@ def main():
 
     # Networks loading
     nets, unet, cnn, fcnn, ucnn = get_brats_nets(
-        n_channels=image_names.shape[-1],
+        n_channels=len(image_names),
         filters_list=[32] * 3,
         kernel_size_list=[3] * 3,
         nlabels=nlabels,
@@ -56,7 +59,7 @@ def main():
     )
 
     ensemble = get_brats_ensemble(
-        n_channels=image_names.shape[-1],
+        n_channels=len(image_names),
         n_blocks=3,
         unet=unet,
         cnn=cnn,
@@ -73,6 +76,8 @@ def main():
     [x, y, z] = np.stack(test_centers, axis=1)
     image[x, y, z] = np.argmax(pr_maps, axis=1).astype(dtype=np.int8)
 
+    if not os.path.isdir('/data/results'):
+        os.mkdir('/data/results')
     roi_nii = load_nii(flair_name)
     roi_nii.get_data()[:] = image
     roi_nii.to_filename('/data/results/tumor_NVICOROB_class.nii.gz')
