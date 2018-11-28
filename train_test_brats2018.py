@@ -224,8 +224,8 @@ def get_patient_roi_slice(path, p):
     bounding_box_max = np.max(np.nonzero(brain), axis=1)
     center_of_masses = np.mean(np.nonzero(roi), axis=1, dtype=np.int)
     slices = [[
-        slice(bounding_box_min[0], bounding_box_max[0]),
-        slice(bounding_box_min[1], bounding_box_max[1]),
+        slice(bounding_box_min[0], bounding_box_max[0] + 1),
+        slice(bounding_box_min[1], bounding_box_max[1] + 1),
         slice(center_of_masses[-1] - n_slices / 2, center_of_masses[-1] + n_slices / 2)
     ]]
 
